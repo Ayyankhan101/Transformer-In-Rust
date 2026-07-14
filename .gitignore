@@ -1,1 +1,12 @@
 /target
+
+# Large model weights (download separately)
+codegen_weights/pytorch_model.bin
+codegen_weights/.cache/
+glm_checkpoint.txt
+
+# Editor/OS
+*.swp
+*.swo
+*~
+.DS_Store
