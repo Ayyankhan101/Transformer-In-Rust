@@ -132,7 +132,7 @@ graph LR
 
 ```mermaid
 graph TD
-    Prompt["User Prompt"] Tokenize["BPE Tokenize"]
+    Prompt["User Prompt"] --> Tokenize["BPE Tokenize"]
     Tokenize --> Prefill["Prefill: KV Cache Population"]
     Prefill --> Sample["Sample: Last Token Logit"]
     Sample --> Loop{"EOS or max tokens?"}
