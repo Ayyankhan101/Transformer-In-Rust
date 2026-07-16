@@ -4,6 +4,8 @@
 [advisories]
 version = 2
 ignore = [
+    # paste crate is unmaintained but widely used as transitive dep
+    "RUSTSEC-2024-0436",
 ]
 
 [licenses]
