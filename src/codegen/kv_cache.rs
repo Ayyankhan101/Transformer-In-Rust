@@ -1,4 +1,4 @@
-use candle_core::{Device, Result, Tensor};
+use candle_core::{Device, DType, Result, Tensor};
 
 pub struct KVCache {
     k: Tensor,
@@ -9,9 +9,9 @@ pub struct KVCache {
 }
 
 impl KVCache {
-    pub fn new(max_seq_len: usize, n_heads: usize, head_dim: usize, device: &Device) -> Result<Self> {
-        let k = Tensor::zeros((1, n_heads, max_seq_len, head_dim), candle_core::DType::F32, device)?;
-        let v = Tensor::zeros((1, n_heads, max_seq_len, head_dim), candle_core::DType::F32, device)?;
+    pub fn new(max_seq_len: usize, n_heads: usize, head_dim: usize, dtype: DType, device: &Device) -> Result<Self> {
+        let k = Tensor::zeros((1, n_heads, max_seq_len, head_dim), dtype, device)?;
+        let v = Tensor::zeros((1, n_heads, max_seq_len, head_dim), dtype, device)?;
         Ok(Self { k, v, pos: 0, n_heads, head_dim })
     }
 

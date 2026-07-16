@@ -76,9 +76,10 @@ impl CodeGenModel {
 
         if cache.is_none() {
             let device = x.device().clone();
+            let dtype = self.config.dtype;
             let mut caches = Vec::with_capacity(self.blocks.len());
             for _ in 0..self.blocks.len() {
-                caches.push(KVCache::new(max_seq, n_heads, head_dim, &device)?);
+                caches.push(KVCache::new(max_seq, n_heads, head_dim, dtype, &device)?);
             }
             *cache = Some(caches);
         }
@@ -107,7 +108,7 @@ impl CodeGenModel {
                 let (_, _, q_len, _) = q_rot.dims4()?;
                 let (_, _, kv_len, _) = k_full.dims4()?;
                 if q_len > 1 && q_len == kv_len {
-                    let mask = crate::layers::attention::causal_mask(q_len, scores.device())?;
+                    let mask = crate::layers::attention::causal_mask(q_len, scores.device(), scores.dtype())?;
                     scores = scores.broadcast_add(&mask)?;
                 }
 

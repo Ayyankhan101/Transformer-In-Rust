@@ -1,21 +1,14 @@
-mod codegen;
-mod generation;
-mod glm;
-mod layers;
-mod tokenizer;
-mod training;
-
 use std::path::Path;
 
 use anyhow::Result;
 use candle_core::Device;
 
-use crate::codegen::{CodeGenConfig, WeightLoader};
-use crate::generation::{CodeGenGenerator, GLMGenerator};
-use crate::glm::{GLMConfig, GLMModel};
-use crate::glm::attention_mask::build_glm_mask;
-use crate::tokenizer::CodeGenTokenizer;
-use crate::training::GLMTrainer;
+use rust_transformer::codegen::{CodeGenConfig, WeightLoader};
+use rust_transformer::generation::{CodeGenGenerator, GLMGenerator};
+use rust_transformer::glm::{GLMConfig, GLMModel};
+use rust_transformer::glm::attention_mask::build_glm_mask;
+use rust_transformer::tokenizer::CodeGenTokenizer;
+use rust_transformer::training::{GLMTrainer, TrainingConfig};
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -30,6 +23,8 @@ fn main() -> Result<()> {
         Some("--glm-fill-blanks") => run_glm_fill_blanks(&device)?,
         Some("--codegen") => run_codegen_inference(&device, use_f16)?,
         Some("--repl") => run_codegen_repl(&device, use_f16)?,
+        Some("--serve") => run_serve(&args)?,
+        Some("--download-codegen") => run_download_codegen()?,
         Some("--info") => print_info()?,
         _ => print_usage(),
     }
@@ -50,6 +45,8 @@ fn print_usage() {
     println!("  --codegen --f16               CodeGen-350M inference in FP16");
     println!("  --repl                        CodeGen-350M interactive REPL");
     println!("  --repl --f16                  CodeGen-350M REPL in FP16");
+    println!("  --serve [port]                Start HTTP inference server (default: 3000)");
+    println!("  --download-codegen            Download CodeGen-350M weights from HuggingFace");
     println!("  --info                        Print model info");
 }
 
@@ -114,29 +111,35 @@ fn run_glm_demo(device: &Device) -> Result<()> {
 fn run_glm_train(args: &[String], device: &Device) -> Result<()> {
     println!("=== GLM Training ===\n");
 
-    let config = GLMConfig::default();
-    let mut trainer = GLMTrainer::new(config.clone(), device)?;
+    // Load config from YAML if provided, else use defaults
+    let train_config = args.iter()
+        .position(|a| a == "--config")
+        .and_then(|i| args.get(i + 1))
+        .map(|p| TrainingConfig::from_file(p).unwrap())
+        .unwrap_or_default();
+
+    let mut trainer = GLMTrainer::from_config(&train_config, device)?;
 
     let data_path = args.iter()
         .position(|a| a == "--data-path")
         .and_then(|i| args.get(i + 1))
         .map(|s| Path::new(s))
-        .unwrap_or_else(|| Path::new("data"));
+        .unwrap_or_else(|| Path::new(&train_config.data_dir));
 
     let num_steps = args.iter()
         .position(|a| a == "--steps")
         .and_then(|i| args.get(i + 1))
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(1000);
+        .unwrap_or(train_config.max_steps);
 
-    let download = args.iter().any(|a| a == "--download-data");
+    let _download = args.iter().any(|a| a == "--download-data") || train_config.download_if_empty;
 
     trainer.load_checkpoint()?;
 
     println!("Starting from step {}", trainer.step());
     println!("Training for {} steps, data from {:?}", num_steps, data_path);
 
-    trainer.train(data_path, num_steps, download, device)?;
+    trainer.train(data_path, device)?;
 
     Ok(())
 }
@@ -335,5 +338,39 @@ fn run_codegen_repl(device: &Device, use_f16: bool) -> Result<()> {
     }
 
     println!("Bye!");
+    Ok(())
+}
+
+#[cfg(feature = "server")]
+#[tokio::main]
+async fn run_serve(args: &[String]) -> Result<()> {
+    use std::net::SocketAddr;
+    let port: u16 = args.get(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3000);
+    let addr: SocketAddr = ([0, 0, 0, 0], port).into();
+    rust_transformer::server::start_server("codegen_weights/pytorch_model.bin", addr).await
+}
+
+#[cfg(not(feature = "server"))]
+fn run_serve(_args: &[String]) -> Result<()> {
+    anyhow::bail!("Server requires the 'server' feature. Rebuild with: cargo build --features server")
+}
+
+fn run_download_codegen() -> Result<()> {
+    println!("=== Download CodeGen-350M-multi from HuggingFace ===\n");
+    let weight_path = Path::new("codegen_weights/pytorch_model.bin");
+    if weight_path.exists() {
+        println!("Weights already exist at: {}", weight_path.display());
+        return Ok(());
+    }
+    println!("Weights not found. Please download manually:");
+    println!();
+    println!("  huggingface-cli download Salesforce/codegen-350M-multi \\");
+    println!("    --local-dir codegen_weights");
+    println!();
+    println!("Or with git-lfs:");
+    println!("  git lfs install");
+    println!("  git clone https://huggingface.co/Salesforce/codegen-350M-multi codegen_weights");
     Ok(())
 }

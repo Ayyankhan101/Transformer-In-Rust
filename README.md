@@ -9,7 +9,7 @@
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](https://www.rust-lang.org/)
 [![Candle](https://img.shields.io/badge/Candle-0.8-blue)](https://github.com/huggingface/candle)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-16%2F16%20✓-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-20%2F20%20✓-brightgreen)]()
 
 <br>
 
@@ -317,7 +317,7 @@ cargo run --release -- --info
 cargo test
 ```
 
-**16 tests** covering:
+**20 tests** covering:
 
 | Module | Tests |
 |:-------|:------|
@@ -325,9 +325,11 @@ cargo test
 | Attention | Causal mask shape + triangularity |
 | FFN | GELU forward, SwiGLU gate |
 | Norm | LayerNorm, RMSNorm forward |
-| GLM | Causal forward, blank-infill forward, training loss, attention mask |
+| GLM | Causal forward, blank-infill forward, training loss, attention mask, safetensors save/load |
 | CodeGen | Blank-forward, RoPE no-segfault |
+| Quantized | INT8 quantized linear roundtrip, ranking preservation |
 | Sampling | Argmax, temperature-zero |
+| Training | LR scheduler (cosine/linear/constant) |
 
 ---
 

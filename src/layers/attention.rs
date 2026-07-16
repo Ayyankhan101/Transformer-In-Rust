@@ -1,4 +1,4 @@
-use candle_core::{Device, Result, Tensor};
+use candle_core::{Device, DType, Result, Tensor};
 
 pub struct MultiHeadAttention {
     qkv_weight: Tensor,
@@ -78,14 +78,15 @@ impl MultiHeadAttention {
 
 // --- Attention Masks ---
 
-pub fn causal_mask(seq_len: usize, device: &Device) -> Result<Tensor> {
+pub fn causal_mask(seq_len: usize, device: &Device, dtype: DType) -> Result<Tensor> {
     let mask: Vec<f32> = (0..seq_len)
         .flat_map(|i| {
             (0..seq_len)
                 .map(move |j| if j > i { f32::NEG_INFINITY } else { 0.0 })
         })
         .collect();
-    Tensor::from_slice(&mask, (1, 1, seq_len, seq_len), device)
+    let mask = Tensor::from_slice(&mask, (1, 1, seq_len, seq_len), device)?;
+    mask.to_dtype(dtype)
 }
 
 #[cfg(test)]
@@ -95,7 +96,7 @@ mod tests {
     #[test]
     fn test_causal_mask_shape() -> Result<()> {
         let device = Device::Cpu;
-        let mask = causal_mask(4, &device)?;
+        let mask = causal_mask(4, &device, DType::F32)?;
         assert_eq!(mask.dims(), &[1, 1, 4, 4]);
         Ok(())
     }
@@ -103,7 +104,7 @@ mod tests {
     #[test]
     fn test_causal_mask_triangular() -> Result<()> {
         let device = Device::Cpu;
-        let mask = causal_mask(3, &device)?;
+        let mask = causal_mask(3, &device, DType::F32)?;
         // mask shape [1, 1, 3, 3]: extract batch=0, head=0 -> [3, 3]
         let m = mask.get(0)?.get(0)?.to_vec2::<f32>()?;
         assert_eq!(m[0][0], 0.0);

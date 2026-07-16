@@ -1,4 +1,10 @@
-use candle_core::{Device, Result, Tensor, Var};
+#![allow(dead_code)]
+
+use candle_core::{Device, Result, Tensor, Var, DType};
+
+use safetensors::{serialize, SafeTensors};
+use std::collections::HashMap;
+use std::path::Path;
 
 use crate::glm::config::GLMConfig;
 use crate::layers::attention::causal_mask;
@@ -245,7 +251,7 @@ impl TrainableGLMModel {
 
     pub fn forward_causal(&self, token_ids: &[u32]) -> Result<Tensor> {
         let seq_len = token_ids.len();
-        let mask = causal_mask(seq_len, &self.lm_head.device())?;
+        let mask = causal_mask(seq_len, &self.lm_head.device(), candle_core::DType::F32)?;
         self.forward(token_ids, 0, &[], &mask)
     }
 
@@ -266,5 +272,176 @@ impl TrainableGLMModel {
         params.push(self.final_norm.weight.clone());
         params.push(self.lm_head.clone());
         params
+    }
+
+    pub fn param_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        names.push("embedding.weight".to_string());
+        names.push("pos_1_embedding".to_string());
+        names.push("pos_2_embedding".to_string());
+        for i in 0..6 {
+            names.push(format!("h.{i}.norm1.weight"));
+            names.push(format!("h.{i}.attn.qkv_weight"));
+            names.push(format!("h.{i}.attn.out_weight"));
+            names.push(format!("h.{i}.norm2.weight"));
+            names.push(format!("h.{i}.mlp.up"));
+            names.push(format!("h.{i}.mlp.gate"));
+            names.push(format!("h.{i}.mlp.down"));
+        }
+        names.push("final_norm.weight".to_string());
+        names.push("lm_head".to_string());
+        names
+    }
+
+/// Save model weights to safetensors format
+    pub fn save_safetensors<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let vars = self.param_vars();
+        let names = self.param_names();
+        
+        // Collect all tensor data first to keep it alive
+let mut tensor_data = Vec::new();
+        for (name, var) in names.iter().zip(vars.iter()) {
+            let tensor = var.as_tensor();
+            let dtype = tensor.dtype();
+            let shape = tensor.shape().dims().to_vec();
+            println!("Processing tensor: {} shape={:?} dtype={:?}", name, shape, dtype);
+            
+            // Convert tensor to bytes based on its dtype
+            let data: Vec<u8> = match dtype {
+                DType::F32 => {
+                    let flat = tensor.flatten_all()?;
+                    let vec: Vec<f32> = flat.to_vec1()?;
+                    bytemuck::cast_slice(&vec).to_vec()
+                }
+                DType::F16 => {
+                    let flat = tensor.flatten_all()?;
+                    let vec: Vec<half::f16> = flat.to_vec1()?;
+                    bytemuck::cast_slice(&vec).to_vec()
+                }
+                DType::BF16 => {
+                    let flat = tensor.flatten_all()?;
+                    let vec: Vec<half::bf16> = flat.to_vec1()?;
+                    bytemuck::cast_slice(&vec).to_vec()
+                }
+                _ => return Err(candle_core::Error::Msg(format!("Unsupported dtype: {:?}", dtype)).into()),
+            };
+            println!("  -> data len: {}", data.len());
+            tensor_data.push((name.clone(), data, shape, dtype));
+        }
+
+        let mut tensors = HashMap::new();
+        for (name, data, shape, dtype) in &tensor_data {
+            let st_dtype = match dtype {
+                DType::F32 => safetensors::Dtype::F32,
+                DType::F16 => safetensors::Dtype::F16,
+                DType::BF16 => safetensors::Dtype::BF16,
+                _ => return Err(candle_core::Error::Msg(format!("Unsupported dtype: {:?}", dtype)).into()),
+            };
+            println!("Creating TensorView for {}: shape={:?}, data_len={}", name, shape, data.len());
+            tensors.insert(name.clone(), safetensors::tensor::TensorView::new(st_dtype, shape.to_vec(), data)?);
+        }
+
+        let bytes = serialize(&tensors, &None)?;
+        std::fs::write(path, bytes)
+            .map_err(|e| candle_core::Error::Msg(format!("Failed to write safetensors: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Load model weights from safetensors format
+    pub fn load_safetensors<P: AsRef<Path>>(&mut self, path: P, device: &Device) -> Result<()> {
+        let data = std::fs::read(path)
+            .map_err(|e| candle_core::Error::Msg(format!("Failed to read safetensors: {e}")))?;
+
+        let safe = SafeTensors::deserialize(&data)
+            .map_err(|e| candle_core::Error::Msg(format!("Failed to deserialize safetensors: {e}")))?;
+
+        let vars = self.param_vars();
+        let names = self.param_names();
+
+        for (i, var) in vars.iter().enumerate() {
+            let name = &names[i];
+            let tensor_view = safe.tensor(name)
+                .map_err(|e| candle_core::Error::Msg(format!("Failed to get tensor {}: {}", name, e)))?;
+            let shape = tensor_view.shape();
+            let tensor_data = tensor_view.data();
+            let dtype = tensor_view.dtype();
+
+            let tensor = match dtype {
+                safetensors::Dtype::F32 => {
+                    let vec: Vec<f32> = bytemuck::cast_slice(tensor_data).to_vec();
+                    Tensor::from_vec(vec, shape, device)?
+                }
+                safetensors::Dtype::F16 => {
+                    let vec: Vec<half::f16> = bytemuck::cast_slice(tensor_data).to_vec();
+                    Tensor::from_vec(vec, shape, device)?
+                }
+                safetensors::Dtype::BF16 => {
+                    let vec: Vec<half::bf16> = bytemuck::cast_slice(tensor_data).to_vec();
+                    Tensor::from_vec(vec, shape, device)?
+                }
+                _ => return Err(candle_core::Error::Msg(format!("Unsupported dtype: {:?}", dtype)).into()),
+            };
+
+            var.set(&tensor)?;
+        }
+
+        Ok(())
+    }
+
+    /// Create a new TrainableGLMModel from a safetensors file
+    pub fn from_safetensors<P: AsRef<Path>>(path: P, config: GLMConfig, device: &Device) -> Result<Self> {
+        let mut model = Self::new(config, device)?;
+        model.load_safetensors(path, device)?;
+        Ok(model)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_core::Device;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_safetensors_save_load() -> Result<()> {
+        let device = Device::Cpu;
+        let config = GLMConfig {
+            vocab_size: 1000,
+            hidden_dim: 64,
+            num_layers: 2,
+            num_heads: 4,
+            ffn_dim: 256,
+            max_seq_len: 128,
+            _dropout: 0.1,
+            eps: 1e-5,
+            blank_ratio: 0.15,
+            mask_ratio: 0.7,
+            _random_replace_ratio: 0.15,
+        };
+
+        println!("Creating model...");
+        let mut model = TrainableGLMModel::new(config.clone(), &device)?;
+        println!("Model created");
+
+        // Save to temp file
+        let temp_file = NamedTempFile::new()?;
+        let path = temp_file.path().to_str().unwrap();
+        println!("Saving to {:?}", path);
+        model.save_safetensors(path)?;
+        println!("Saved successfully");
+
+        // Load back
+        let mut model2 = TrainableGLMModel::new(config.clone(), &device)?;
+        println!("Loading...");
+        model2.load_safetensors(path, &device)?;
+        println!("Loaded successfully");
+
+        // Test from_safetensors
+        println!("Testing from_safetensors...");
+        let _model3 = TrainableGLMModel::from_safetensors(path, config, &device)?;
+        println!("from_safetensors works");
+
+        Ok(())
     }
 }

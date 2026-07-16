@@ -1,0 +1,70 @@
+# GLM Training Configuration
+# Run with: cargo run --release -- --glm-train --config configs/train.yaml
+
+# Model configuration (matches GLMConfig)
+model:
+  vocab_size: 51200
+  hidden_dim: 256
+  num_layers: 6
+  num_heads: 8
+  ffn_dim: 1024
+  max_seq_len: 512
+  dropout: 0.1
+  eps: 1e-5
+  blank_ratio: 0.15
+  mask_ratio: 0.7
+  random_replace_ratio: 0.15
+
+# Training hyperparameters
+training:
+  # Data
+  data_dir: "data"
+  download_if_empty: true
+  train_split: 0.95
+  seed: 42
+
+  # Optimization
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+  eps: 1e-8
+  max_grad_norm: 1.0
+
+  # Learning rate schedule
+  lr_schedule:
+    type: "cosine"  # "cosine", "linear", "constant"
+    warmup_steps: 500
+    max_steps: 10000
+    min_lr_ratio: 0.1
+
+  # BATCH  # minimum LR as ratio of base LR
+
+  # Batch/accumulation
+  micro_batch_size: 1    # sequences per forward pass (keep 1 for CPU)
+  gradient_accumulation_steps: 32  # simulate batch=32
+  max_seq_len: 512
+
+  # Training loop
+  max_steps: 10000
+  eval_every: 500
+  save_every: 1000
+  log_every: 10
+
+  # Checkpointing
+  checkpoint_dir: "glm_checkpoint"
+  save_optimizer_state: true
+  keep_last_n_checkpoints: 3
+
+  # Precision
+  dtype: "f32"  # "f32" or "f16"
+
+# Evaluation
+evaluation:
+  eval_steps: 100
+  blank_infill_samples: 10
+
+# Logging
+logging:
+  level: "info"
+  log_dir: "logs"

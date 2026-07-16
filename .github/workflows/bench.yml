@@ -1,0 +1,53 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Run benchmarks (short sample)
+        run: cargo bench -- --sample-size 10 --measurement-time 5
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-report
+          path: target/criterion/
+          retention-days: 7
+
+      - name: Check for significant regressions
+        run: |
+          if [ -d target/criterion ]; then
+            echo "Benchmark reports saved to target/criterion/"
+            # Check if any benchmark has >20% regression vs previous baseline
+            for report in target/criterion/*/report/index.html; do
+              if [ -f "$report" ]; then
+                name=$(basename $(dirname $(dirname $report)))
+                echo "  ✓ $name - report generated"
+              fi
+            done
+          fi

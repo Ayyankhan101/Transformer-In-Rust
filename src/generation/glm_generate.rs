@@ -41,7 +41,7 @@ impl GLMGenerator {
 
         for _step in 0..self.max_new_tokens {
             let seq_len = generated.len();
-            let mask = crate::layers::attention::causal_mask(seq_len, device)?;
+            let mask = crate::layers::attention::causal_mask(seq_len, device, candle_core::DType::F32)?;
 
             let logits = self.model.forward(&generated, 0, &[], &mask)?;
 
