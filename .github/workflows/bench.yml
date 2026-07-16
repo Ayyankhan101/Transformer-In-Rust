@@ -30,7 +30,7 @@ jobs:
           cache-on-failure: true
 
       - name: Run benchmarks (short sample)
-        run: cargo bench -- --sample-size 10 --measurement-time 5
+        run: cargo bench --bench transformer -- --warm-up-time 1 --measurement-time 1 --sample-size 10
 
       - name: Upload benchmark report
         uses: actions/upload-artifact@v4

@@ -2,12 +2,13 @@
 # https://EmbarkStudios.github.io/cargo-deny/
 
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
-yanked = "warn"
-notice = "warn"
+version = 2
+ignore = [
+    # cvss 4.0 not yet supported by cargo-deny
+]
 
 [licenses]
+version = 2
 unlicensed = "deny"
 allow = [
     "MIT",
