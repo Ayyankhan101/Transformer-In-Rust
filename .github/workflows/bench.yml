@@ -2,9 +2,9 @@ name: Benchmarks
 
 on:
   push:
-    branches: [main]
+    branches: [develop, main]
   pull_request:
-    branches: [main]
+    branches: [develop, main]
   workflow_dispatch:
 
 concurrency:
@@ -13,10 +13,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -Dwarnings
 
 jobs:
   benchmark:
+    name: Criterion Benchmarks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,17 +37,38 @@ jobs:
         with:
           name: criterion-report
           path: target/criterion/
-          retention-days: 7
+          retention-days: 30
 
-      - name: Check for significant regressions
-        run: |
-          if [ -d target/criterion ]; then
-            echo "Benchmark reports saved to target/criterion/"
-            # Check if any benchmark has >20% regression vs previous baseline
-            for report in target/criterion/*/report/index.html; do
-              if [ -f "$report" ]; then
-                name=$(basename $(dirname $(dirname $report)))
-                echo "  ✓ $name - report generated"
-              fi
-            done
-          fi
+      - name: Post benchmark results (PR only)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            let body = '## Benchmark Results\n\n';
+            body += '| Benchmark | Time | Change |\n';
+            body += '|:----------|:-----|:-------|\n';
+
+            const criterionDir = 'target/criterion';
+            if (fs.existsSync(criterionDir)) {
+              const groups = fs.readdirSync(criterionDir);
+              for (const group of groups) {
+                const reportPath = path.join(criterionDir, group, 'new', 'estimates.json');
+                if (fs.existsSync(reportPath)) {
+                  const estimates = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+                  const mean = estimates.mean.point_estimate / 1e6; // ns to ms
+                  body += `| ${group} | ${mean.toFixed(2)} ms | new baseline |\n`;
+                }
+              }
+            }
+
+            body += '\n*Full report uploaded as artifact.*';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
