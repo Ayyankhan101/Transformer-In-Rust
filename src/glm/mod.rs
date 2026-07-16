@@ -5,4 +5,3 @@ pub mod positions;
 pub mod trainable;
 
 pub use config::GLMConfig;
-pub use model::GLMModel;

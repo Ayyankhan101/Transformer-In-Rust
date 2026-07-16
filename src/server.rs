@@ -33,10 +33,18 @@ pub struct GenerateRequest {
     pub top_p: f64,
 }
 
-fn default_max_tokens() -> usize { 128 }
-fn default_temperature() -> f64 { 0.8 }
-fn default_top_k() -> usize { 40 }
-fn default_top_p() -> f64 { 0.9 }
+fn default_max_tokens() -> usize {
+    128
+}
+fn default_temperature() -> f64 {
+    0.8
+}
+fn default_top_k() -> usize {
+    40
+}
+fn default_top_p() -> f64 {
+    0.9
+}
 
 #[derive(Serialize)]
 pub struct GenerateResponse {
@@ -51,30 +59,23 @@ pub struct HealthResponse {
     pub model: String,
 }
 
-pub async fn start_server(
-    weights_path: &str,
-    addr: SocketAddr,
-) -> anyhow::Result<()> {
+pub async fn start_server(weights_path: &str, addr: SocketAddr) -> anyhow::Result<()> {
     let device = candle_core::Device::Cpu;
     let config = CodeGenConfig::default();
 
     println!("Loading CodeGen model from {weights_path}...");
-    let model = WeightLoader::load_from_pytorch(
-        std::path::Path::new(weights_path),
-        &config,
-        &device,
-    )?;
+    let model =
+        WeightLoader::load_from_pytorch(std::path::Path::new(weights_path), &config, &device)?;
 
     let tokenizer = CodeGenTokenizer::from_file("codegen_weights/tokenizer.json")
         .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {e}"))?;
 
     let generator = CodeGenGenerator::new(
-        model,
-        0.8,  // temperature
-        40,   // top_k
-        0.9,  // top_p
-        1.1,  // repetition_penalty
-        256,  // max_new_tokens
+        model, 0.8, // temperature
+        40,  // top_k
+        0.9, // top_p
+        1.1, // repetition_penalty
+        256, // max_new_tokens
     );
 
     let state = Arc::new(AppState {
@@ -105,7 +106,9 @@ async fn generate(
     State(state): State<Arc<AppState>>,
     Json(req): Json<GenerateRequest>,
 ) -> Result<Json<GenerateResponse>, (StatusCode, String)> {
-    let prompt_ids = state.tokenizer.encode(&req.prompt)
+    let prompt_ids = state
+        .tokenizer
+        .encode(&req.prompt)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Tokenization error: {e}")))?;
 
     let mut gen = state.generator.lock().await;
@@ -114,11 +117,22 @@ async fn generate(
     gen.set_top_p(req.top_p);
     gen.set_max_new_tokens(req.max_tokens);
 
-    let tokens = gen.generate(&prompt_ids)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Generation error: {e}")))?;
+    let tokens = gen.generate(&prompt_ids).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Generation error: {e}"),
+        )
+    })?;
 
-    let generated = state.tokenizer.decode(&tokens[prompt_ids.len()..])
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Decode error: {e}")))?;
+    let generated = state
+        .tokenizer
+        .decode(&tokens[prompt_ids.len()..])
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Decode error: {e}"),
+            )
+        })?;
 
     let token_count = tokens.len() - prompt_ids.len();
 

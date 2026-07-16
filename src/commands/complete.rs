@@ -38,13 +38,11 @@ pub fn run(
 
         let start = std::time::Instant::now();
         let mut print_stream = PrintStream;
-        ctx.generator.generate_stream(&token_ids, &mut print_stream)?;
+        ctx.generator
+            .generate_stream(&token_ids, &mut print_stream)?;
         let elapsed = start.elapsed();
 
-        println!(
-            "\n\x1b[90m--- {:.1}s ---\x1b[0m",
-            elapsed.as_secs_f64()
-        );
+        println!("\n\x1b[90m--- {:.1}s ---\x1b[0m", elapsed.as_secs_f64());
     } else {
         let start = std::time::Instant::now();
         let mut collector = CollectStream::new();

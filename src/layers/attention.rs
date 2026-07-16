@@ -1,4 +1,4 @@
-use candle_core::{Device, DType, Result, Tensor};
+use candle_core::{DType, Device, Result, Tensor};
 
 pub struct MultiHeadAttention {
     qkv_weight: Tensor,
@@ -12,10 +12,20 @@ impl MultiHeadAttention {
     pub fn new_blank(hidden_dim: usize, num_heads: usize, device: &Device) -> Result<Self> {
         assert_eq!(hidden_dim % num_heads, 0);
         let head_dim = hidden_dim / num_heads;
-        let qkv_weight = Tensor::zeros((hidden_dim, hidden_dim * 3), candle_core::DType::F32, device)?;
+        let qkv_weight = Tensor::zeros(
+            (hidden_dim, hidden_dim * 3),
+            candle_core::DType::F32,
+            device,
+        )?;
         let out_weight = Tensor::zeros((hidden_dim, hidden_dim), candle_core::DType::F32, device)?;
         let scale = 1.0 / (head_dim as f64).sqrt();
-        Ok(Self { qkv_weight, out_weight, num_heads, head_dim, scale })
+        Ok(Self {
+            qkv_weight,
+            out_weight,
+            num_heads,
+            head_dim,
+            scale,
+        })
     }
 
     pub fn new(hidden_dim: usize, num_heads: usize, device: &Device) -> Result<Self> {
@@ -24,21 +34,29 @@ impl MultiHeadAttention {
         let qkv_weight = Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim * 3), device)?;
         let out_weight = Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim), device)?;
         let scale = 1.0 / (head_dim as f64).sqrt();
-        Ok(Self { qkv_weight, out_weight, num_heads, head_dim, scale })
+        Ok(Self {
+            qkv_weight,
+            out_weight,
+            num_heads,
+            head_dim,
+            scale,
+        })
     }
 
     pub fn from_tensors(qkv_weight: Tensor, out_weight: Tensor, num_heads: usize) -> Self {
         let hidden_dim = qkv_weight.dim(0).unwrap();
         let head_dim = hidden_dim / num_heads;
         let scale = 1.0 / (head_dim as f64).sqrt();
-        Self { qkv_weight, out_weight, num_heads, head_dim, scale }
+        Self {
+            qkv_weight,
+            out_weight,
+            num_heads,
+            head_dim,
+            scale,
+        }
     }
 
-    pub fn forward_with_mask(
-        &self,
-        x: &Tensor,
-        mask: Option<&Tensor>,
-    ) -> Result<Tensor> {
+    pub fn forward_with_mask(&self, x: &Tensor, mask: Option<&Tensor>) -> Result<Tensor> {
         let (batch_size, seq_len, hidden_dim) = x.dims3()?;
         let qkv = x.broadcast_matmul(&self.qkv_weight.unsqueeze(0)?)?;
         let qkv = qkv.reshape((batch_size, seq_len, 3, self.num_heads, self.head_dim))?;
@@ -63,7 +81,9 @@ impl MultiHeadAttention {
         let attention_weights = candle_nn::ops::softmax(&scaled_scores, 3)?;
         let context = attention_weights.broadcast_matmul(&v)?;
 
-        let context = context.permute((0, 2, 1, 3))?.reshape((batch_size, seq_len, hidden_dim))?;
+        let context = context
+            .permute((0, 2, 1, 3))?
+            .reshape((batch_size, seq_len, hidden_dim))?;
         context.broadcast_matmul(&self.out_weight.unsqueeze(0)?)
     }
 
@@ -80,10 +100,7 @@ impl MultiHeadAttention {
 
 pub fn causal_mask(seq_len: usize, device: &Device, dtype: DType) -> Result<Tensor> {
     let mask: Vec<f32> = (0..seq_len)
-        .flat_map(|i| {
-            (0..seq_len)
-                .map(move |j| if j > i { f32::NEG_INFINITY } else { 0.0 })
-        })
+        .flat_map(|i| (0..seq_len).map(move |j| if j > i { f32::NEG_INFINITY } else { 0.0 }))
         .collect();
     let mask = Tensor::from_slice(&mask, (1, 1, seq_len, seq_len), device)?;
     mask.to_dtype(dtype)
@@ -119,5 +136,3 @@ mod tests {
         Ok(())
     }
 }
-
-

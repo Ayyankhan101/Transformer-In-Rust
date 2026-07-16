@@ -18,7 +18,11 @@ impl GLMPositionEncoding {
     pub fn new(max_positions: usize, hidden_dim: usize, device: &Device) -> Result<Self> {
         let pos_1_embedding = Tensor::randn(0.0f32, 0.02f32, (max_positions, hidden_dim), device)?;
         let pos_2_embedding = Tensor::randn(0.0f32, 0.02f32, (max_positions, hidden_dim), device)?;
-        Ok(Self { pos_1_embedding, pos_2_embedding, _hidden_dim: hidden_dim })
+        Ok(Self {
+            pos_1_embedding,
+            pos_2_embedding,
+            _hidden_dim: hidden_dim,
+        })
     }
 
     /// Build 2D position encoding for a sequence with blanks
@@ -61,6 +65,6 @@ impl GLMPositionEncoding {
 
         // Combine: add both 2D positional signals
         let combined = pos_1_emb.broadcast_add(&pos_2_emb)?;
-        Ok(combined.unsqueeze(0)?)
+        combined.unsqueeze(0)
     }
 }

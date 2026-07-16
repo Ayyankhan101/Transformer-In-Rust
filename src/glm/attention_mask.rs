@@ -6,11 +6,7 @@ use candle_core::{Device, Result, Tensor};
 /// - Context tokens attend to all context + all blanks (bidirectional)
 /// - Blank tokens attend to all context + earlier blanks + same blank (causal within span)
 /// - Later blanks are masked out for earlier blank tokens
-pub fn build_glm_mask(
-    context_len: usize,
-    blank_lens: &[usize],
-    device: &Device,
-) -> Result<Tensor> {
+pub fn build_glm_mask(context_len: usize, blank_lens: &[usize], device: &Device) -> Result<Tensor> {
     let total_len = context_len + blank_lens.iter().sum::<usize>();
     let mut mask_data = vec![0.0f32; total_len * total_len];
 
@@ -107,9 +103,9 @@ mod tests {
         assert_eq!(mask.dims(), &[1, 1, 4, 4]);
         // mask shape [1, 1, 4, 4]; extract batch=0, head=0 -> [4, 4]
         let m = mask.get(0)?.get(0)?.to_vec2::<f32>()?;
-        for i in 0..4 {
-            for j in 0..4 {
-                assert_eq!(m[i][j], 0.0, "m[{i}][{j}] should be 0");
+        for (i, row) in m.iter().enumerate() {
+            for (j, &val) in row.iter().enumerate() {
+                assert_eq!(val, 0.0, "m[{i}][{j}] should be 0");
             }
         }
         Ok(())
@@ -135,5 +131,3 @@ mod tests {
         Ok(())
     }
 }
-
-

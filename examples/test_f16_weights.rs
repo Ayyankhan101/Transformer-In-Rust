@@ -1,9 +1,18 @@
-use candle_core::{Device, DType, Tensor};
+use candle_core::{DType, Device, Tensor};
 
-fn load_tensor(pth: &candle_core::pickle::PthTensors, name: &str, dtype: DType, device: &Device) -> Option<Tensor> {
+fn load_tensor(
+    pth: &candle_core::pickle::PthTensors,
+    name: &str,
+    dtype: DType,
+    device: &Device,
+) -> Option<Tensor> {
     let t = pth.get(name).ok()?;
     let t = t?;
-    let t = if t.dtype() != dtype { t.to_dtype(dtype).ok()? } else { t };
+    let t = if t.dtype() != dtype {
+        t.to_dtype(dtype).ok()?
+    } else {
+        t
+    };
     t.to_device(device).ok()
 }
 
@@ -13,16 +22,31 @@ fn main() -> candle_core::Result<()> {
 
     // Check weight dtypes
     let w = pth.get("token_embd.weight").unwrap().unwrap();
-    println!("token_embd.weight: dtype={:?}, shape={:?}", w.dtype(), w.shape());
+    println!(
+        "token_embd.weight: dtype={:?}, shape={:?}",
+        w.dtype(),
+        w.shape()
+    );
 
-    let w = pth.get("transformer.h.0.attn.qkv_proj.weight").unwrap().unwrap();
-    println!("qkv_proj.weight: dtype={:?}, shape={:?}", w.dtype(), w.shape());
+    let w = pth
+        .get("transformer.h.0.attn.qkv_proj.weight")
+        .unwrap()
+        .unwrap();
+    println!(
+        "qkv_proj.weight: dtype={:?}, shape={:?}",
+        w.dtype(),
+        w.shape()
+    );
 
     let w = pth.get("transformer.h.0.ln_1.weight").unwrap().unwrap();
     println!("ln_1.weight: dtype={:?}, shape={:?}", w.dtype(), w.shape());
 
     let w = pth.get("lm_head.weight").unwrap().unwrap();
-    println!("lm_head.weight: dtype={:?}, shape={:?}", w.dtype(), w.shape());
+    println!(
+        "lm_head.weight: dtype={:?}, shape={:?}",
+        w.dtype(),
+        w.shape()
+    );
 
     // Test F16 matmul
     let a = Tensor::randn(0.0f32, 1.0f32, (1, 1024), &device)?.to_dtype(DType::F16)?;

@@ -1,18 +1,20 @@
-use std::path::{Path, PathBuf};
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 
-use candle_core::{Device, Result, Tensor, DType};
-use candle_nn::{AdamW, ParamsAdamW, Optimizer};
+use bytemuck;
+use candle_core::{DType, Device, Result, Tensor};
+use candle_nn::{AdamW, Optimizer, ParamsAdamW};
+use half;
 use safetensors::tensor::TensorView;
 use safetensors::SafeTensors;
-use bytemuck;
-use half;
 
 use crate::glm::config::GLMConfig;
 use crate::glm::trainable::TrainableGLMModel;
 use crate::tokenizer::CodeGenTokenizer;
 use crate::training::config::TrainingConfig;
-use crate::training::data::{DataLoader, download_default_data, split_train_eval, TrainingExample as DataTrainingExample};
+use crate::training::data::{
+    download_default_data, split_train_eval, DataLoader, TrainingExample as DataTrainingExample,
+};
 use crate::training::lr_scheduler::LrScheduler;
 
 #[allow(dead_code)]
@@ -118,17 +120,16 @@ impl GLMTrainer {
         Ok(loss_scalar)
     }
 
-    pub fn train(
-        &mut self,
-        data_dir: &Path,
-        device: &Device,
-    ) -> Result<()> {
+    pub fn train(&mut self, data_dir: &Path, device: &Device) -> Result<()> {
         // Load data
         let mut examples = load_data(data_dir, &self.tokenizer)?;
 
         if examples.is_empty() {
             if self.config.download_if_empty {
-                println!("No data found in {:?}, downloading sample data...", data_dir);
+                println!(
+                    "No data found in {:?}, downloading sample data...",
+                    data_dir
+                );
                 download_default_data(data_dir)?;
                 examples = load_data(data_dir, &self.tokenizer)?;
             }
@@ -141,14 +142,15 @@ impl GLMTrainer {
 
         // Split train/eval
         let (train_examples, eval_examples) = split_train_eval(&examples, self.config.train_split);
-        println!("Train examples: {}, Eval examples: {}", train_examples.len(), eval_examples.len());
+        println!(
+            "Train examples: {}, Eval examples: {}",
+            train_examples.len(),
+            eval_examples.len()
+        );
 
         // Create data loaders
-        let mut train_loader = DataLoader::from_examples(
-            train_examples,
-            self.config.max_seq_len,
-            self.config.seed,
-        )?;
+        let mut train_loader =
+            DataLoader::from_examples(train_examples, self.config.max_seq_len, self.config.seed)?;
 
         let mut eval_loader = DataLoader::from_examples(
             eval_examples,
@@ -175,7 +177,8 @@ impl GLMTrainer {
 
                 // Logging
                 if self.step % self.config.log_every == 0 {
-                    let avg_loss: f64 = self.loss_history.iter().sum::<f64>() / self.loss_history.len() as f64;
+                    let avg_loss: f64 =
+                        self.loss_history.iter().sum::<f64>() / self.loss_history.len() as f64;
                     let current_lr = self.lr_scheduler.get_lr();
                     println!(
                         "Step {}: loss = {:.4} (avg = {:.4}), lr = {:.2e}",
@@ -257,8 +260,9 @@ impl GLMTrainer {
 
     pub fn save_checkpoint(&self) -> Result<()> {
         let dir = Path::new(&self.config.checkpoint_dir);
-        std::fs::create_dir_all(dir)
-            .map_err(|e| candle_core::Error::Msg(format!("Failed to create checkpoint dir: {e}")))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            candle_core::Error::Msg(format!("Failed to create checkpoint dir: {e}"))
+        })?;
 
         let params = self.model.param_vars();
         let names = param_names();
@@ -280,10 +284,12 @@ impl GLMTrainer {
             let state = serde_json::json!({
                 "step": self.step,
             });
-            let opt_json = serde_json::to_string_pretty(&state)
-                .map_err(|e| candle_core::Error::Msg(format!("Failed to serialize optimizer state: {e}")))?;
-            std::fs::write(&opt_path, opt_json)
-                .map_err(|e| candle_core::Error::Msg(format!("Failed to write optimizer state: {e}")))?;
+            let opt_json = serde_json::to_string_pretty(&state).map_err(|e| {
+                candle_core::Error::Msg(format!("Failed to serialize optimizer state: {e}"))
+            })?;
+            std::fs::write(&opt_path, opt_json).map_err(|e| {
+                candle_core::Error::Msg(format!("Failed to write optimizer state: {e}"))
+            })?;
         }
 
         // Save training state
@@ -312,7 +318,12 @@ impl GLMTrainer {
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("safetensors"))
-            .filter(|p| p.file_name().unwrap_or_default().to_string_lossy().starts_with("model_step_"))
+            .filter(|p| {
+                p.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .starts_with("model_step_")
+            })
             .collect();
 
         checkpoints.sort();
@@ -322,7 +333,14 @@ impl GLMTrainer {
             load_safetensors(latest, &mut self.model)?;
 
             // Load optimizer state
-            let opt_path = dir.join(latest.file_name().unwrap().to_string_lossy().replace("model_", "optimizer_").replace(".safetensors", ".json"));
+            let opt_path = dir.join(
+                latest
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace("model_", "optimizer_")
+                    .replace(".safetensors", ".json"),
+            );
             if opt_path.exists() {
                 if let Ok(content) = std::fs::read_to_string(&opt_path) {
                     if let Ok(state) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -355,7 +373,12 @@ impl GLMTrainer {
         let mut model_checkpoints: Vec<PathBuf> = std::fs::read_dir(dir)?
             .filter_map(|e| e.ok())
             .map(|e| e.path())
-            .filter(|p| p.file_name().unwrap_or_default().to_string_lossy().starts_with("model_step_"))
+            .filter(|p| {
+                p.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .starts_with("model_step_")
+            })
             .collect();
 
         model_checkpoints.sort();
@@ -363,7 +386,14 @@ impl GLMTrainer {
         while model_checkpoints.len() > self.config.keep_last_n_checkpoints {
             let oldest = model_checkpoints.remove(0);
             let _ = std::fs::remove_file(&oldest);
-            let opt_file = dir.join(oldest.file_name().unwrap().to_string_lossy().replace("model_", "optimizer_").replace(".safetensors", ".json"));
+            let opt_file = dir.join(
+                oldest
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace("model_", "optimizer_")
+                    .replace(".safetensors", ".json"),
+            );
             let _ = std::fs::remove_file(&opt_file);
         }
 
@@ -380,11 +410,11 @@ fn cross_entropy_loss(logits: &Tensor, labels: &[i64]) -> Result<Tensor> {
     let mut total_loss = 0.0f32;
     let mut count = 0usize;
 
-    for i in 0..seq_len {
-        if labels[i] >= 0 {
+    for (i, &label) in labels.iter().enumerate().take(seq_len) {
+        if label >= 0 {
             let logits_i = logits.get(0)?.get(i)?;
             let ce = candle_nn::ops::log_softmax(&logits_i, 0)?
-                .get(labels[i] as usize)?
+                .get(label as usize)?
                 .neg()?;
             total_loss += ce.to_scalar::<f32>()?;
             count += 1;
@@ -395,7 +425,7 @@ fn cross_entropy_loss(logits: &Tensor, labels: &[i64]) -> Result<Tensor> {
         total_loss /= count as f32;
     }
 
-    Ok(Tensor::new(total_loss, logits.device())?)
+    Tensor::new(total_loss, logits.device())
 }
 
 fn param_names() -> Vec<String> {
@@ -423,7 +453,7 @@ fn save_safetensors(path: &Path, tensors: &[(String, &Tensor)]) -> Result<()> {
 
     // Collect tensor data first to keep it alive
     let mut tensor_data = Vec::new();
-    
+
     for (name, tensor) in tensors {
         let data = tensor.to_vec1::<u8>()?;
         let shape = tensor.shape().dims().to_vec();
@@ -432,14 +462,22 @@ fn save_safetensors(path: &Path, tensors: &[(String, &Tensor)]) -> Result<()> {
             DType::F32 => safetensors::Dtype::F32,
             DType::F16 => safetensors::Dtype::F16,
             DType::BF16 => safetensors::Dtype::BF16,
-            _ => return Err(candle_core::Error::Msg(format!("Unsupported dtype: {:?}", dtype)).into()),
+            _ => {
+                return Err(candle_core::Error::Msg(format!(
+                    "Unsupported dtype: {:?}",
+                    dtype
+                )))
+            }
         };
         tensor_data.push((name.clone(), data, shape, st_dtype));
     }
-    
+
     let mut tensor_map = HashMap::new();
     for (name, data, shape, st_dtype) in &tensor_data {
-        tensor_map.insert(name.clone(), TensorView::new(*st_dtype, shape.clone(), data)?);
+        tensor_map.insert(
+            name.clone(),
+            TensorView::new(*st_dtype, shape.clone(), data)?,
+        );
     }
 
     let bytes = serialize(tensor_map, &None)?;
@@ -459,10 +497,11 @@ fn load_safetensors(path: &Path, model: &mut TrainableGLMModel) -> Result<()> {
     let params = model.param_vars();
     let names = param_names();
 
-for (i, var) in params.iter().enumerate() {
+    for (i, var) in params.iter().enumerate() {
         let name = names.get(i).map(|s| s.as_str()).unwrap_or("unknown");
-        let tensor_view = safe.tensor(name)
-            .map_err(|e| candle_core::Error::Msg(format!("Failed to get tensor {}: {}", name, e)))?;
+        let tensor_view = safe.tensor(name).map_err(|e| {
+            candle_core::Error::Msg(format!("Failed to get tensor {}: {}", name, e))
+        })?;
         let shape = tensor_view.shape();
         let tensor_data = tensor_view.data();
         let dtype = tensor_view.dtype();
@@ -480,7 +519,12 @@ for (i, var) in params.iter().enumerate() {
                 let vec: Vec<half::bf16> = bytemuck::cast_slice(tensor_data).to_vec();
                 Tensor::from_vec(vec, shape, var.as_tensor().device())?
             }
-            _ => return Err(candle_core::Error::Msg(format!("Unsupported dtype: {:?}", dtype)).into()),
+            _ => {
+                return Err(candle_core::Error::Msg(format!(
+                    "Unsupported dtype: {:?}",
+                    dtype
+                )))
+            }
         };
 
         var.set(&tensor)?;

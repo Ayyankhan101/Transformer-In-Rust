@@ -1,4 +1,4 @@
-use candle_core::{Device, DType, Result, Tensor};
+use candle_core::{DType, Device, Result, Tensor};
 
 /// Rotary Position Embedding (RoPE)
 ///
@@ -31,19 +31,23 @@ impl RotaryEmbedding {
         let cos_cache = cos_cache.to_dtype(dtype)?;
         let sin_cache = sin_cache.to_dtype(dtype)?;
 
-        Ok(Self { cos_cache, sin_cache, dim })
+        Ok(Self {
+            cos_cache,
+            sin_cache,
+            dim,
+        })
     }
 
-    pub fn apply_rotary(
-        &self,
-        x: &Tensor,
-        positions: &[usize],
-    ) -> Result<Tensor> {
+    pub fn apply_rotary(&self, x: &Tensor, positions: &[usize]) -> Result<Tensor> {
         let (_, _, _, head_dim) = x.dims4()?;
 
         let cos = self.cos_cache.index_select(
             &Tensor::from_slice(
-                positions.iter().map(|&p| p as u32).collect::<Vec<_>>().as_slice(),
+                positions
+                    .iter()
+                    .map(|&p| p as u32)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
                 positions.len(),
                 x.device(),
             )?,
@@ -51,7 +55,11 @@ impl RotaryEmbedding {
         )?;
         let sin = self.sin_cache.index_select(
             &Tensor::from_slice(
-                positions.iter().map(|&p| p as u32).collect::<Vec<_>>().as_slice(),
+                positions
+                    .iter()
+                    .map(|&p| p as u32)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
                 positions.len(),
                 x.device(),
             )?,

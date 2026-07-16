@@ -25,15 +25,14 @@ fn codegen_forward_pass_with_real_weights() {
     )
     .expect("Failed to load model");
 
-    let tokenizer = rust_transformer::tokenizer::CodeGenTokenizer::from_file(
-        "codegen_weights/tokenizer.json",
-    )
-    .expect("Failed to load tokenizer");
+    let tokenizer =
+        rust_transformer::tokenizer::CodeGenTokenizer::from_file("codegen_weights/tokenizer.json")
+            .expect("Failed to load tokenizer");
 
     let prompt = "def fibonacci(n):";
     let token_ids = tokenizer.encode(prompt).expect("Failed to encode");
 
-    let mut gen = rust_transformer::generation::codegen_generate::CodeGenGenerator::new(
+    let gen = rust_transformer::generation::codegen_generate::CodeGenGenerator::new(
         model, 0.0, 1, 1.0, 1.0, 64,
     );
 
@@ -42,7 +41,10 @@ fn codegen_forward_pass_with_real_weights() {
 
     println!("Prompt: {prompt}");
     println!("Generated: {output}");
-    assert!(generated.len() > token_ids.len(), "Should generate at least one token");
+    assert!(
+        generated.len() > token_ids.len(),
+        "Should generate at least one token"
+    );
 }
 
 #[test]
@@ -52,10 +54,9 @@ fn codegen_tokenizer_encode_decode_roundtrip() {
         return;
     }
 
-    let tokenizer = rust_transformer::tokenizer::CodeGenTokenizer::from_file(
-        "codegen_weights/tokenizer.json",
-    )
-    .expect("Failed to load tokenizer");
+    let tokenizer =
+        rust_transformer::tokenizer::CodeGenTokenizer::from_file("codegen_weights/tokenizer.json")
+            .expect("Failed to load tokenizer");
 
     let text = "Hello, world!";
     let ids = tokenizer.encode(text).expect("Encode failed");

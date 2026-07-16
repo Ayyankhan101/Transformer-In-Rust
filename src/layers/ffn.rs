@@ -1,6 +1,7 @@
 use candle_core::{Device, Result, Tensor};
 
 #[allow(dead_code)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Activation {
     SwiGLU,
     GELU,
@@ -60,6 +61,7 @@ impl SwiGLU {
 }
 
 // --- GELU FFN (CodeGen-style) ---
+#[allow(clippy::upper_case_acronyms)]
 pub struct GELUFFN {
     fc_in: Tensor,
     fc_out: Tensor,
@@ -104,7 +106,12 @@ impl GELUNewFFN {
         let fc_in_bias = Tensor::zeros(ffn_dim, candle_core::DType::F32, device)?;
         let fc_out = Tensor::zeros((ffn_dim, hidden_dim), candle_core::DType::F32, device)?;
         let fc_out_bias = Tensor::zeros(hidden_dim, candle_core::DType::F32, device)?;
-        Ok(Self { fc_in, fc_in_bias, fc_out, fc_out_bias })
+        Ok(Self {
+            fc_in,
+            fc_in_bias,
+            fc_out,
+            fc_out_bias,
+        })
     }
 
     #[allow(dead_code)]
@@ -115,11 +122,26 @@ impl GELUNewFFN {
         let dtype = fc_in.dtype();
         let fc_in_bias = Tensor::zeros(ffn_dim, dtype, device).unwrap();
         let fc_out_bias = Tensor::zeros(hidden_dim, dtype, device).unwrap();
-        Self { fc_in, fc_in_bias, fc_out, fc_out_bias }
+        Self {
+            fc_in,
+            fc_in_bias,
+            fc_out,
+            fc_out_bias,
+        }
     }
 
-    pub fn from_tensors_with_bias(fc_in: Tensor, fc_in_bias: Tensor, fc_out: Tensor, fc_out_bias: Tensor) -> Self {
-        Self { fc_in, fc_in_bias, fc_out, fc_out_bias }
+    pub fn from_tensors_with_bias(
+        fc_in: Tensor,
+        fc_in_bias: Tensor,
+        fc_out: Tensor,
+        fc_out_bias: Tensor,
+    ) -> Self {
+        Self {
+            fc_in,
+            fc_in_bias,
+            fc_out,
+            fc_out_bias,
+        }
     }
 
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
@@ -132,6 +154,7 @@ impl GELUNewFFN {
 }
 
 // --- Configurable FFN ---
+#[allow(clippy::upper_case_acronyms)]
 pub enum FeedForward {
     SwiGLU(SwiGLU),
     GELU(GELUFFN),
@@ -139,19 +162,35 @@ pub enum FeedForward {
 }
 
 impl FeedForward {
-    pub fn new_blank(activation: Activation, hidden_dim: usize, ffn_dim: usize, device: &Device) -> Result<Self> {
+    pub fn new_blank(
+        activation: Activation,
+        hidden_dim: usize,
+        ffn_dim: usize,
+        device: &Device,
+    ) -> Result<Self> {
         match activation {
-            Activation::SwiGLU => Ok(Self::SwiGLU(SwiGLU::new_blank(hidden_dim, ffn_dim, device)?)),
+            Activation::SwiGLU => Ok(Self::SwiGLU(SwiGLU::new_blank(
+                hidden_dim, ffn_dim, device,
+            )?)),
             Activation::GELU => Ok(Self::GELU(GELUFFN::new_blank(hidden_dim, ffn_dim, device)?)),
-            Activation::GELUNew => Ok(Self::GELUNew(GELUNewFFN::new_blank(hidden_dim, ffn_dim, device)?)),
+            Activation::GELUNew => Ok(Self::GELUNew(GELUNewFFN::new_blank(
+                hidden_dim, ffn_dim, device,
+            )?)),
         }
     }
 
-    pub fn new(activation: Activation, hidden_dim: usize, ffn_dim: usize, device: &Device) -> Result<Self> {
+    pub fn new(
+        activation: Activation,
+        hidden_dim: usize,
+        ffn_dim: usize,
+        device: &Device,
+    ) -> Result<Self> {
         match activation {
             Activation::SwiGLU => Ok(Self::SwiGLU(SwiGLU::new(hidden_dim, ffn_dim, device)?)),
             Activation::GELU => Ok(Self::GELU(GELUFFN::new(hidden_dim, ffn_dim, device)?)),
-            Activation::GELUNew => Ok(Self::GELUNew(GELUNewFFN::new_blank(hidden_dim, ffn_dim, device)?)),
+            Activation::GELUNew => Ok(Self::GELUNew(GELUNewFFN::new_blank(
+                hidden_dim, ffn_dim, device,
+            )?)),
         }
     }
 

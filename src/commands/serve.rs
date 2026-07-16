@@ -5,8 +5,8 @@ use crate::cli::Cli;
 pub fn run(cli: &Cli, port: u16) -> Result<()> {
     #[cfg(feature = "server")]
     {
-        use std::net::SocketAddr;
         use crate::server;
+        use std::net::SocketAddr;
         let addr: SocketAddr = ([0, 0, 0, 0], port).into();
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(server::start_server(

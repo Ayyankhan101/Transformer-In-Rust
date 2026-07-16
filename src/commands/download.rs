@@ -10,7 +10,11 @@ pub fn run(cli: &Cli) -> Result<()> {
     if weights_path.exists() {
         let meta = std::fs::metadata(&weights_path)?;
         let size_mb = meta.len() as f64 / (1024.0 * 1024.0);
-        println!("Weights already present at: {} ({:.1} MB)", weights_path.display(), size_mb);
+        println!(
+            "Weights already present at: {} ({:.1} MB)",
+            weights_path.display(),
+            size_mb
+        );
         return Ok(());
     }
 
@@ -50,7 +54,10 @@ fn print_manual_instructions(weights_dir: &Path) {
     println!("  1. Install git-lfs:");
     println!("     git lfs install\n");
     println!("  2. Clone the repo:");
-    println!("     git clone https://huggingface.co/Salesforce/codegen-350M-multi {}\n", weights_dir.display());
+    println!(
+        "     git clone https://huggingface.co/Salesforce/codegen-350M-multi {}\n",
+        weights_dir.display()
+    );
     println!("  3. Or use wget for individual files:");
     println!("     wget -P {}/ https://huggingface.co/Salesforce/codegen-350M-multi/resolve/main/pytorch_model.bin", weights_dir.display());
     println!("     wget -P {}/ https://huggingface.co/Salesforce/codegen-350M-multi/resolve/main/tokenizer.json", weights_dir.display());

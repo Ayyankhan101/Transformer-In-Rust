@@ -32,8 +32,14 @@ impl CodeGenBlock {
         let norm1 = LayerNorm::zeros_with_dtype(config.hidden_dim, config.eps, dtype, device)?;
         let norm2 = LayerNorm::zeros_with_dtype(config.hidden_dim, config.eps, dtype, device)?;
         let attn = MultiHeadAttention::new_blank(config.hidden_dim, config.num_heads, device)?;
-        let ffn = FeedForward::new_blank(Activation::GELU, config.hidden_dim, config.ffn_dim, device)?;
-        Ok(Self { norm1, norm2, attn, ffn })
+        let ffn =
+            FeedForward::new_blank(Activation::GELU, config.hidden_dim, config.ffn_dim, device)?;
+        Ok(Self {
+            norm1,
+            norm2,
+            attn,
+            ffn,
+        })
     }
 }
 
@@ -108,14 +114,21 @@ impl CodeGenModel {
                 let (_, _, q_len, _) = q_rot.dims4()?;
                 let (_, _, kv_len, _) = k_full.dims4()?;
                 if q_len > 1 && q_len == kv_len {
-                    let mask = crate::layers::attention::causal_mask(q_len, scores.device(), scores.dtype())?;
+                    let mask = crate::layers::attention::causal_mask(
+                        q_len,
+                        scores.device(),
+                        scores.dtype(),
+                    )?;
                     scores = scores.broadcast_add(&mask)?;
                 }
 
                 let weights = candle_nn::ops::softmax(&scores, 3)?;
                 let context = weights.broadcast_matmul(&v_full)?;
 
-                let context = context.permute((0, 2, 1, 3))?.reshape((bs, sl, self.config.hidden_dim))?;
+                let context =
+                    context
+                        .permute((0, 2, 1, 3))?
+                        .reshape((bs, sl, self.config.hidden_dim))?;
                 context.broadcast_matmul(&block.attn.out_weight().unsqueeze(0)?)
             };
             let attn_out = attn_out?;

@@ -129,7 +129,10 @@ impl ChatSession {
     pub fn trim_to_fit(&mut self, tokenizer: &CodeGenTokenizer) {
         // Build a prompt with all history and check token count
         let full_prompt = self.assemble_prompt("");
-        let token_count = tokenizer.encode(&full_prompt).map(|ids| ids.len()).unwrap_or(0);
+        let token_count = tokenizer
+            .encode(&full_prompt)
+            .map(|ids| ids.len())
+            .unwrap_or(0);
 
         if token_count <= self.max_context_tokens {
             return;
@@ -138,7 +141,10 @@ impl ChatSession {
         // Remove oldest turns until we fit (keep at least the last user turn)
         while self.history.len() > 2 {
             let test_prompt = self.assemble_prompt("");
-            let count = tokenizer.encode(&test_prompt).map(|ids| ids.len()).unwrap_or(0);
+            let count = tokenizer
+                .encode(&test_prompt)
+                .map(|ids| ids.len())
+                .unwrap_or(0);
             if count <= self.max_context_tokens {
                 break;
             }

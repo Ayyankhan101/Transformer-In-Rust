@@ -42,7 +42,11 @@ pub fn sample(
     let vocab_size = logits_vec.len();
     let k = top_k.min(vocab_size);
     if k < vocab_size {
-        let mut indexed: Vec<(usize, f32)> = logits_vec.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+        let mut indexed: Vec<(usize, f32)> = logits_vec
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| (i, v))
+            .collect();
         indexed.select_nth_unstable_by(vocab_size - k, |a, b| a.1.partial_cmp(&b.1).unwrap());
         let threshold = indexed[vocab_size - k].1;
         for v in logits_vec.iter_mut() {
@@ -62,7 +66,11 @@ pub fn sample(
         *v /= sum;
     }
 
-    let mut indexed: Vec<(usize, f32)> = logits_vec.iter().enumerate().map(|(i, &p)| (i, p)).collect();
+    let mut indexed: Vec<(usize, f32)> = logits_vec
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| (i, p))
+        .collect();
     indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
     let mut cumulative = 0.0f32;

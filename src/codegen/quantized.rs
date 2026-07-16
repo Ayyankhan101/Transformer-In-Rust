@@ -1,15 +1,15 @@
 #![allow(dead_code)]
 
-/// INT8 Dynamic Quantization for CodeGen-350M
-///
-/// Quantizes linear layer weights from F32 to INT8 with per-channel scaling,
-/// reducing memory footprint by ~4× and potentially improving cache performance.
-///
-/// Quantization scheme:
-///   weight_int8 = round(weight_f32 / scale)
-///   scale = max(abs(weight_f32), epsilon) / 127.0
-///
-/// Forward: out = (weight_int8 * scale) @ input
+//! INT8 Dynamic Quantization for CodeGen-350M
+//!
+//! Quantizes linear layer weights from F32 to INT8 with per-channel scaling,
+//! reducing memory footprint by ~4× and potentially improving cache performance.
+//!
+//! Quantization scheme:
+//!   weight_int8 = round(weight_f32 / scale)
+//!   scale = max(abs(weight_f32), epsilon) / 127.0
+//!
+//! Forward: out = (weight_int8 * scale) @ input
 
 use candle_core::{DType, Device, Result, Tensor};
 
@@ -32,7 +32,8 @@ impl QuantizedLinear {
         let dims = weight.dims();
         if dims.len() != 2 {
             return Err(candle_core::Error::Msg(format!(
-                "Expected 2D weight tensor, got {}D", dims.len()
+                "Expected 2D weight tensor, got {}D",
+                dims.len()
             )));
         }
         let out_dim = dims[0];
@@ -53,7 +54,8 @@ impl QuantizedLinear {
             let row_slice = &w_vec[start..end];
 
             // Find scale for this row (per-channel)
-            let max_abs = row_slice.iter()
+            let max_abs = row_slice
+                .iter()
                 .map(|v| v.abs())
                 .fold(f32::MIN_POSITIVE, f32::max);
             let scale = (max_abs / 127.0).max(f32::MIN_POSITIVE);
@@ -67,20 +69,20 @@ impl QuantizedLinear {
         }
 
         let weight_q = Tensor::from_vec(quantized, (out_dim, in_dim), &Device::Cpu)?;
-        let scale_t = Tensor::from_vec(scales, (out_dim, 1), &Device::Cpu)?
-            .to_dtype(DType::F32)?;
+        let scale_t = Tensor::from_vec(scales, (out_dim, 1), &Device::Cpu)?.to_dtype(DType::F32)?;
 
         Ok(Self {
             weight_int8: weight_q.to_device(device)?,
             scale: scale_t.to_device(device)?,
-            out_dim, in_dim,
+            out_dim,
+            in_dim,
         })
     }
 
     /// Forward pass: dequantize on-the-fly and compute matmul.
     ///
-    /// `input` shape: [batch, seq_len, in_dim] or [in_dim]
-    /// Returns shape: [batch, seq_len, out_dim] or [out_dim]
+    /// `input` shape: \[batch, seq\_len, `in_dim`\] or \[`in_dim`\]
+    /// Returns shape: \[batch, seq\_len, `out_dim`\] or \[`out_dim`\]
     pub fn forward(&self, input: &Tensor) -> Result<Tensor> {
         // Dequantize: weight_f32 = (weight_u8 - 128) * scale
         // weight_int8 shape: [out_dim, in_dim]
@@ -105,12 +107,12 @@ impl QuantizedLinear {
     /// Estimated size in bytes (INT8 weights + F32 scales)
     pub fn estimated_size(&self) -> usize {
         self.out_dim * self.in_dim         // INT8 weights: 1 byte each
-            + self.out_dim * 4             // F32 scales: 4 bytes each
+            + self.out_dim * 4 // F32 scales: 4 bytes each
     }
 
     /// Original F32 size for comparison
     pub fn original_size(&self) -> usize {
-        self.out_dim * self.in_dim * 4     // F32: 4 bytes each
+        self.out_dim * self.in_dim * 4 // F32: 4 bytes each
     }
 }
 
@@ -176,11 +178,7 @@ mod tests {
         let device = Device::Cpu;
 
         // Create a simple weight matrix
-        let w = Tensor::from_vec(
-            vec![1.0f32, -2.0, 3.0, -4.0, 5.0, -6.0],
-            (2, 3),
-            &device,
-        )?;
+        let w = Tensor::from_vec(vec![1.0f32, -2.0, 3.0, -4.0, 5.0, -6.0], (2, 3), &device)?;
 
         let qlinear = QuantizedLinear::from_f32(&w, &device)?;
 
@@ -201,7 +199,9 @@ mod tests {
         assert!(
             (original as f64 / estimated as f64) > 1.0,
             "Should have some compression, got {}/{} = {:.1}x",
-            original, estimated, original as f64 / estimated as f64
+            original,
+            estimated,
+            original as f64 / estimated as f64
         );
 
         println!("  Original size: {original} bytes");
@@ -217,11 +217,7 @@ mod tests {
         let device = Device::Cpu;
 
         // Create weights with clear pattern
-        let w = Tensor::from_vec(
-            vec![10.0f32, 0.0, 0.0, 0.0, 20.0, 0.0],
-            (2, 3),
-            &device,
-        )?;
+        let w = Tensor::from_vec(vec![10.0f32, 0.0, 0.0, 0.0, 20.0, 0.0], (2, 3), &device)?;
 
         let qlinear = QuantizedLinear::from_f32(&w, &device)?;
 

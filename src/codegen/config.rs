@@ -41,7 +41,8 @@ impl CodeGenConfig {
         let hidden_dim = config["n_embd"].as_u64().unwrap_or(1024) as usize;
         let num_layers = config["n_layer"].as_u64().unwrap_or(20) as usize;
         let num_heads = config["n_head"].as_u64().unwrap_or(16) as usize;
-        let ffn_dim = config["n_inner"].as_u64()
+        let ffn_dim = config["n_inner"]
+            .as_u64()
             .map(|v| v as usize)
             .unwrap_or(hidden_dim * 4);
         let max_seq_len = config["n_positions"].as_u64().unwrap_or(2048) as usize;

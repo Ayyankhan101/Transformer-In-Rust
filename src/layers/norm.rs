@@ -24,7 +24,6 @@ impl RMSNorm {
         };
         x.broadcast_div(&norm_x_3d)?.broadcast_mul(&weight)
     }
-
 }
 
 // --- LayerNorm ---
@@ -42,7 +41,12 @@ impl LayerNorm {
         Ok(Self { weight, bias, eps })
     }
 
-    pub fn zeros_with_dtype(dim: usize, eps: f64, dtype: candle_core::DType, device: &Device) -> Result<Self> {
+    pub fn zeros_with_dtype(
+        dim: usize,
+        eps: f64,
+        dtype: candle_core::DType,
+        device: &Device,
+    ) -> Result<Self> {
         let weight = Tensor::zeros(dim, dtype, device)?;
         let bias = Tensor::zeros(dim, dtype, device)?;
         Ok(Self { weight, bias, eps })

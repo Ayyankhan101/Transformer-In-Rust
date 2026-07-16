@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use candle_core::{Device, Result, Tensor, Var, DType};
+use candle_core::{DType, Device, Result, Tensor, Var};
 
 use safetensors::{serialize, SafeTensors};
 use std::collections::HashMap;
@@ -48,7 +48,8 @@ impl TrainableRMSNorm {
         let variance = x.sqr()?.mean(last_dim)?;
         let norm_x = (variance + self.eps)?.sqrt()?;
         let norm_x_3d = norm_x.unsqueeze(last_dim)?;
-        x.broadcast_div(&norm_x_3d)?.broadcast_mul(&self.weight.as_tensor())
+        x.broadcast_div(&norm_x_3d)?
+            .broadcast_mul(self.weight.as_tensor())
     }
 }
 
@@ -98,7 +99,9 @@ impl TrainableAttention {
         Ok(Self {
             qkv_weight: Var::from_tensor(&qkv_t)?,
             out_weight: Var::from_tensor(&out_t)?,
-            num_heads, head_dim, scale,
+            num_heads,
+            head_dim,
+            scale,
         })
     }
 
@@ -126,7 +129,9 @@ impl TrainableAttention {
 
         let attention_weights = candle_nn::ops::softmax(&masked, 3)?;
         let context = attention_weights.broadcast_matmul(&v)?;
-        let context = context.permute((0, 2, 1, 3))?.reshape((batch_size, seq_len, _hidden_dim))?;
+        let context = context
+            .permute((0, 2, 1, 3))?
+            .reshape((batch_size, seq_len, _hidden_dim))?;
         context.broadcast_matmul(&self.out_weight.as_tensor().unsqueeze(0)?)
     }
 }
@@ -140,7 +145,13 @@ pub struct TrainableBlock {
 }
 
 impl TrainableBlock {
-    pub fn new(hidden_dim: usize, num_heads: usize, ffn_dim: usize, eps: f64, device: &Device) -> Result<Self> {
+    pub fn new(
+        hidden_dim: usize,
+        num_heads: usize,
+        ffn_dim: usize,
+        eps: f64,
+        device: &Device,
+    ) -> Result<Self> {
         Ok(Self {
             norm1: TrainableRMSNorm::new(hidden_dim, eps, device)?,
             attn: TrainableAttention::new(hidden_dim, num_heads, device)?,
@@ -173,30 +184,54 @@ impl TrainableGLMModel {
     pub fn new(config: GLMConfig, device: &Device) -> Result<Self> {
         let embedding = TrainableEmbedding::new(config.vocab_size, config.hidden_dim, device)?;
 
-        let p1 = Tensor::randn(0.0f32, 0.02f32, (config.max_seq_len, config.hidden_dim), device)?;
-        let p2 = Tensor::randn(0.0f32, 0.02f32, (config.max_seq_len, config.hidden_dim), device)?;
+        let p1 = Tensor::randn(
+            0.0f32,
+            0.02f32,
+            (config.max_seq_len, config.hidden_dim),
+            device,
+        )?;
+        let p2 = Tensor::randn(
+            0.0f32,
+            0.02f32,
+            (config.max_seq_len, config.hidden_dim),
+            device,
+        )?;
 
         let mut blocks = Vec::new();
         for _ in 0..config.num_layers {
             blocks.push(TrainableBlock::new(
-                config.hidden_dim, config.num_heads,
-                config.ffn_dim, config.eps, device,
+                config.hidden_dim,
+                config.num_heads,
+                config.ffn_dim,
+                config.eps,
+                device,
             )?);
         }
 
         let final_norm = TrainableRMSNorm::new(config.hidden_dim, config.eps, device)?;
-        let lm_t = Tensor::randn(0.0f32, 0.02f32, (config.hidden_dim, config.vocab_size), device)?;
+        let lm_t = Tensor::randn(
+            0.0f32,
+            0.02f32,
+            (config.hidden_dim, config.vocab_size),
+            device,
+        )?;
 
         Ok(Self {
             embedding,
             pos_1_embedding: Var::from_tensor(&p1)?,
             pos_2_embedding: Var::from_tensor(&p2)?,
-            blocks, final_norm,
+            blocks,
+            final_norm,
             lm_head: Var::from_tensor(&lm_t)?,
         })
     }
 
-    fn apply_positions(&self, x: &Tensor, context_len: usize, blank_lens: &[usize]) -> Result<Tensor> {
+    fn apply_positions(
+        &self,
+        x: &Tensor,
+        context_len: usize,
+        blank_lens: &[usize],
+    ) -> Result<Tensor> {
         let seq_len = x.dims()[1];
         if context_len == 0 && blank_lens.is_empty() {
             let pos_ids: Vec<u32> = (0..seq_len as u32).collect();
@@ -251,7 +286,7 @@ impl TrainableGLMModel {
 
     pub fn forward_causal(&self, token_ids: &[u32]) -> Result<Tensor> {
         let seq_len = token_ids.len();
-        let mask = causal_mask(seq_len, &self.lm_head.device(), candle_core::DType::F32)?;
+        let mask = causal_mask(seq_len, self.lm_head.device(), candle_core::DType::F32)?;
         self.forward(token_ids, 0, &[], &mask)
     }
 
@@ -293,19 +328,22 @@ impl TrainableGLMModel {
         names
     }
 
-/// Save model weights to safetensors format
+    /// Save model weights to safetensors format
     pub fn save_safetensors<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let vars = self.param_vars();
         let names = self.param_names();
-        
+
         // Collect all tensor data first to keep it alive
-let mut tensor_data = Vec::new();
+        let mut tensor_data = Vec::new();
         for (name, var) in names.iter().zip(vars.iter()) {
             let tensor = var.as_tensor();
             let dtype = tensor.dtype();
             let shape = tensor.shape().dims().to_vec();
-            println!("Processing tensor: {} shape={:?} dtype={:?}", name, shape, dtype);
-            
+            println!(
+                "Processing tensor: {} shape={:?} dtype={:?}",
+                name, shape, dtype
+            );
+
             // Convert tensor to bytes based on its dtype
             let data: Vec<u8> = match dtype {
                 DType::F32 => {
@@ -323,7 +361,12 @@ let mut tensor_data = Vec::new();
                     let vec: Vec<half::bf16> = flat.to_vec1()?;
                     bytemuck::cast_slice(&vec).to_vec()
                 }
-                _ => return Err(candle_core::Error::Msg(format!("Unsupported dtype: {:?}", dtype)).into()),
+                _ => {
+                    return Err(candle_core::Error::Msg(format!(
+                        "Unsupported dtype: {:?}",
+                        dtype
+                    )))
+                }
             };
             println!("  -> data len: {}", data.len());
             tensor_data.push((name.clone(), data, shape, dtype));
@@ -335,10 +378,23 @@ let mut tensor_data = Vec::new();
                 DType::F32 => safetensors::Dtype::F32,
                 DType::F16 => safetensors::Dtype::F16,
                 DType::BF16 => safetensors::Dtype::BF16,
-                _ => return Err(candle_core::Error::Msg(format!("Unsupported dtype: {:?}", dtype)).into()),
+                _ => {
+                    return Err(candle_core::Error::Msg(format!(
+                        "Unsupported dtype: {:?}",
+                        dtype
+                    )))
+                }
             };
-            println!("Creating TensorView for {}: shape={:?}, data_len={}", name, shape, data.len());
-            tensors.insert(name.clone(), safetensors::tensor::TensorView::new(st_dtype, shape.to_vec(), data)?);
+            println!(
+                "Creating TensorView for {}: shape={:?}, data_len={}",
+                name,
+                shape,
+                data.len()
+            );
+            tensors.insert(
+                name.clone(),
+                safetensors::tensor::TensorView::new(st_dtype, shape.to_vec(), data)?,
+            );
         }
 
         let bytes = serialize(&tensors, &None)?;
@@ -353,16 +409,18 @@ let mut tensor_data = Vec::new();
         let data = std::fs::read(path)
             .map_err(|e| candle_core::Error::Msg(format!("Failed to read safetensors: {e}")))?;
 
-        let safe = SafeTensors::deserialize(&data)
-            .map_err(|e| candle_core::Error::Msg(format!("Failed to deserialize safetensors: {e}")))?;
+        let safe = SafeTensors::deserialize(&data).map_err(|e| {
+            candle_core::Error::Msg(format!("Failed to deserialize safetensors: {e}"))
+        })?;
 
         let vars = self.param_vars();
         let names = self.param_names();
 
         for (i, var) in vars.iter().enumerate() {
             let name = &names[i];
-            let tensor_view = safe.tensor(name)
-                .map_err(|e| candle_core::Error::Msg(format!("Failed to get tensor {}: {}", name, e)))?;
+            let tensor_view = safe.tensor(name).map_err(|e| {
+                candle_core::Error::Msg(format!("Failed to get tensor {}: {}", name, e))
+            })?;
             let shape = tensor_view.shape();
             let tensor_data = tensor_view.data();
             let dtype = tensor_view.dtype();
@@ -380,7 +438,12 @@ let mut tensor_data = Vec::new();
                     let vec: Vec<half::bf16> = bytemuck::cast_slice(tensor_data).to_vec();
                     Tensor::from_vec(vec, shape, device)?
                 }
-                _ => return Err(candle_core::Error::Msg(format!("Unsupported dtype: {:?}", dtype)).into()),
+                _ => {
+                    return Err(candle_core::Error::Msg(format!(
+                        "Unsupported dtype: {:?}",
+                        dtype
+                    )))
+                }
             };
 
             var.set(&tensor)?;
@@ -390,7 +453,11 @@ let mut tensor_data = Vec::new();
     }
 
     /// Create a new TrainableGLMModel from a safetensors file
-    pub fn from_safetensors<P: AsRef<Path>>(path: P, config: GLMConfig, device: &Device) -> Result<Self> {
+    pub fn from_safetensors<P: AsRef<Path>>(
+        path: P,
+        config: GLMConfig,
+        device: &Device,
+    ) -> Result<Self> {
         let mut model = Self::new(config, device)?;
         model.load_safetensors(path, device)?;
         Ok(model)
@@ -421,7 +488,7 @@ mod tests {
         };
 
         println!("Creating model...");
-        let mut model = TrainableGLMModel::new(config.clone(), &device)?;
+        let model = TrainableGLMModel::new(config.clone(), &device)?;
         println!("Model created");
 
         // Save to temp file

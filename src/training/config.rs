@@ -116,7 +116,9 @@ impl TrainingConfig {
         }
     }
 
-    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_file<P: AsRef<std::path::Path>>(
+        path: P,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(path)?;
         let config: TrainingConfig = serde_yaml::from_str(&content)?;
         Ok(config)
@@ -144,7 +146,9 @@ impl Default for LrScheduleConfig {
 }
 
 impl TrainConfig {
-    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_file<P: AsRef<std::path::Path>>(
+        path: P,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(path)?;
         let config: TrainConfig = serde_yaml::from_str(&content)?;
         Ok(config)

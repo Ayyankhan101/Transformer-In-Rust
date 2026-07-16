@@ -12,10 +12,16 @@ pub fn run(cli: &Cli, data_path: &str, steps: usize) -> Result<()> {
 
     println!("\x1b[1mGLM Training Demo ({dtype_str})\x1b[0m\n");
 
-    let mut config = TrainingConfig::default();
-    config.data_dir = PathBuf::from(data_path);
-    config.max_steps = steps;
-    config.dtype = if cli.f16 { "f16".to_string() } else { "f32".to_string() };
+    let config = TrainingConfig {
+        data_dir: PathBuf::from(data_path),
+        max_steps: steps,
+        dtype: if cli.f16 {
+            "f16".to_string()
+        } else {
+            "f32".to_string()
+        },
+        ..TrainingConfig::default()
+    };
 
     println!("GLM Config:");
     println!("  vocab_size:   50257");

@@ -45,7 +45,7 @@ impl ModelContext {
         }
 
         let device = Device::Cpu;
-        let dtype_str = if use_f16 { "FP16" } else { "FP32" };
+        let _dtype_str = if use_f16 { "FP16" } else { "FP32" };
 
         let tokenizer = CodeGenTokenizer::from_file(tokenizer_path.to_str().unwrap())?;
         let model = WeightLoader::load_from_pytorch(&weights_path, &config, &device)?;

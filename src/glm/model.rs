@@ -1,9 +1,9 @@
 use candle_core::{Device, Result, Tensor};
 
+use crate::layers::block::TransformerBlock;
 use crate::layers::embedding::Embedding;
 use crate::layers::ffn::Activation;
 use crate::layers::norm::RMSNorm;
-use crate::layers::block::TransformerBlock;
 
 use super::config::GLMConfig;
 use super::positions::GLMPositionEncoding;
@@ -20,11 +20,8 @@ pub struct GLMModel {
 impl GLMModel {
     pub fn new(config: GLMConfig, device: &Device) -> Result<Self> {
         let embedding = Embedding::new(config.vocab_size, config.hidden_dim, device)?;
-        let position_encoding = GLMPositionEncoding::new(
-            config.max_seq_len,
-            config.hidden_dim,
-            device,
-        )?;
+        let position_encoding =
+            GLMPositionEncoding::new(config.max_seq_len, config.hidden_dim, device)?;
 
         let mut blocks = Vec::new();
         for _ in 0..config.num_layers {
@@ -39,7 +36,12 @@ impl GLMModel {
         }
 
         let final_norm = RMSNorm::new(config.hidden_dim, config.eps, device)?;
-        let lm_head = Tensor::randn(0.0f32, 0.02f32, (config.hidden_dim, config.vocab_size), device)?;
+        let lm_head = Tensor::randn(
+            0.0f32,
+            0.02f32,
+            (config.hidden_dim, config.vocab_size),
+            device,
+        )?;
 
         Ok(Self {
             embedding,
@@ -51,16 +53,26 @@ impl GLMModel {
         })
     }
 
-    fn apply_positions(&self, x: &Tensor, context_len: usize, blank_lens: &[usize]) -> Result<Tensor> {
+    fn apply_positions(
+        &self,
+        x: &Tensor,
+        context_len: usize,
+        blank_lens: &[usize],
+    ) -> Result<Tensor> {
         let seq_len = x.dims()[1];
         if context_len == 0 && blank_lens.is_empty() {
             // Causal mode: use simple learned positions
             let pos_ids: Vec<u32> = (0..seq_len as u32).collect();
             let pos_tensor = Tensor::new(pos_ids.as_slice(), x.device())?;
-            let pos_emb = self.position_encoding.pos_1_embedding.index_select(&pos_tensor, 0)?;
+            let pos_emb = self
+                .position_encoding
+                .pos_1_embedding
+                .index_select(&pos_tensor, 0)?;
             x.broadcast_add(&pos_emb.unsqueeze(0)?)
         } else {
-            let pos = self.position_encoding.forward(context_len, blank_lens, x.device())?;
+            let pos = self
+                .position_encoding
+                .forward(context_len, blank_lens, x.device())?;
             x.broadcast_add(&pos)
         }
     }
@@ -99,11 +111,11 @@ impl GLMModel {
         let mut total_loss = 0.0f32;
         let mut count = 0;
 
-        for i in 0..seq_len {
-            if labels[i] >= 0 {
+        for (i, &label) in labels.iter().enumerate().take(seq_len) {
+            if label >= 0 {
                 let logits_i = logits.get(0)?.get(i)?;
                 let ce = candle_nn::ops::log_softmax(&logits_i, 0)?
-                    .get(labels[i] as usize)?
+                    .get(label as usize)?
                     .neg()?;
                 total_loss += ce.to_scalar::<f32>()?;
                 count += 1;
@@ -114,7 +126,7 @@ impl GLMModel {
             total_loss /= count as f32;
         }
 
-        Ok(Tensor::new(total_loss, logits.device())?)
+        Tensor::new(total_loss, logits.device())
     }
 }
 

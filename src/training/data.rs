@@ -1,13 +1,13 @@
 #![allow(dead_code)]
 
-use std::io::Read;
-use std::path::Path;
 use crate::tokenizer::CodeGenTokenizer;
 use candle_core::Result;
+use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
+use std::io::Read;
+use std::path::Path;
 
 #[derive(Clone)]
 pub struct TrainingExample {
@@ -22,7 +22,12 @@ pub struct DataLoader {
 }
 
 impl DataLoader {
-    pub fn new(data_dir: &Path, tokenizer: &CodeGenTokenizer, max_seq_len: usize, seed: u64) -> Result<Self> {
+    pub fn new(
+        data_dir: &Path,
+        tokenizer: &CodeGenTokenizer,
+        max_seq_len: usize,
+        seed: u64,
+    ) -> Result<Self> {
         let examples = load_data(data_dir, tokenizer)?;
         let mut rng = StdRng::seed_from_u64(seed);
         let mut shuffled = examples;
@@ -35,7 +40,11 @@ impl DataLoader {
         })
     }
 
-    pub fn from_examples(examples: Vec<TrainingExample>, max_seq_len: usize, seed: u64) -> Result<Self> {
+    pub fn from_examples(
+        examples: Vec<TrainingExample>,
+        max_seq_len: usize,
+        seed: u64,
+    ) -> Result<Self> {
         let mut rng = StdRng::seed_from_u64(seed);
         let mut shuffled = examples;
         shuffled.shuffle(&mut rng);
@@ -113,7 +122,8 @@ fn load_data(data_dir: &Path, tokenizer: &CodeGenTokenizer) -> Result<Vec<Traini
 }
 
 pub fn download_default_data(dest_dir: &Path) -> Result<()> {
-    const DEFAULT_DATA_URL: &str = "https://raw.githubusercontent.com/python/cpython/v3.12.0/Lib/functools.py";
+    const DEFAULT_DATA_URL: &str =
+        "https://raw.githubusercontent.com/python/cpython/v3.12.0/Lib/functools.py";
 
     println!("  Downloading sample Python code from CPython repository...");
     let response = ureq::get(DEFAULT_DATA_URL)
@@ -138,7 +148,10 @@ pub fn download_default_data(dest_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn split_train_eval(examples: &[TrainingExample], train_split: f64) -> (Vec<TrainingExample>, Vec<TrainingExample>) {
+pub fn split_train_eval(
+    examples: &[TrainingExample],
+    train_split: f64,
+) -> (Vec<TrainingExample>, Vec<TrainingExample>) {
     let len = examples.len();
     if len <= 1 {
         return (examples.to_vec(), Vec::new());

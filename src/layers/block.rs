@@ -15,6 +15,7 @@ pub struct TransformerBlock {
     pub ffn: FeedForward,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 pub enum NormVariant {
     RMS(RMSNorm),
 }
@@ -44,14 +45,15 @@ impl TransformerBlock {
         };
         let attn = MultiHeadAttention::new(hidden_dim, num_heads, device)?;
         let ffn = FeedForward::new(activation, hidden_dim, ffn_dim, device)?;
-        Ok(Self { norm1, attn, norm2, ffn })
+        Ok(Self {
+            norm1,
+            attn,
+            norm2,
+            ffn,
+        })
     }
 
-    pub fn forward(
-        &self,
-        x: &Tensor,
-        mask: Option<&Tensor>,
-    ) -> Result<Tensor> {
+    pub fn forward(&self, x: &Tensor, mask: Option<&Tensor>) -> Result<Tensor> {
         let normed = self.norm1.forward(x)?;
         let attn_out = self.attn.forward_with_mask(&normed, mask)?;
         let x = x.broadcast_add(&attn_out)?;

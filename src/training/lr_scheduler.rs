@@ -43,13 +43,15 @@ impl LrScheduler {
     }
 
     fn cosine_decay(&self, step: f64) -> f64 {
-        let progress = (step - self.warmup_steps as f64) / (self.max_steps - self.warmup_steps) as f64;
+        let progress =
+            (step - self.warmup_steps as f64) / (self.max_steps - self.warmup_steps) as f64;
         let cosine = 0.5 * (1.0 + (std::f64::consts::PI * progress).cos());
         self.min_lr + (self.base_lr - self.min_lr) * cosine
     }
 
     fn linear_decay(&self, step: f64) -> f64 {
-        let progress = (step - self.warmup_steps as f64) / (self.max_steps - self.warmup_steps) as f64;
+        let progress =
+            (step - self.warmup_steps as f64) / (self.max_steps - self.warmup_steps) as f64;
         self.base_lr * (1.0 - progress) + self.min_lr * progress
     }
 

@@ -1,4 +1,4 @@
-use candle_core::{Device, Tensor, DType};
+use candle_core::{DType, Device, Tensor};
 
 fn main() -> candle_core::Result<()> {
     let device = Device::Cpu;

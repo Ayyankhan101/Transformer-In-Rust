@@ -50,8 +50,14 @@ pub fn run(cli: &Cli, system: Option<String>) -> Result<()> {
                 println!("  /clear          Clear conversation history");
                 println!("  /history        Show conversation so far");
                 println!("  /system <msg>   Set system prompt");
-                println!("  /temp <n>       Set temperature (current: {:.1})", ctx.generator.temperature());
-                println!("  /tokens <n>     Set max tokens (current: {})", ctx.generator.max_new_tokens());
+                println!(
+                    "  /temp <n>       Set temperature (current: {:.1})",
+                    ctx.generator.temperature()
+                );
+                println!(
+                    "  /tokens <n>     Set max tokens (current: {})",
+                    ctx.generator.max_new_tokens()
+                );
                 println!("  /save <file>    Save last generated code to file");
                 println!("  exit / quit     Exit\n");
                 continue;
@@ -82,7 +88,12 @@ pub fn run(cli: &Cli, system: Option<String>) -> Result<()> {
                 continue;
             }
             line if line.starts_with("/tokens ") => {
-                if let Ok(n) = line.strip_prefix("/tokens ").unwrap().trim().parse::<usize>() {
+                if let Ok(n) = line
+                    .strip_prefix("/tokens ")
+                    .unwrap()
+                    .trim()
+                    .parse::<usize>()
+                {
                     let n = n.min(1024);
                     ctx.generator.set_max_new_tokens(n);
                     println!("\x1b[33m[Max tokens: {}]\x1b[0m\n", n);
@@ -93,7 +104,12 @@ pub fn run(cli: &Cli, system: Option<String>) -> Result<()> {
             }
             line if line.starts_with("/save ") => {
                 let path = line.strip_prefix("/save ").unwrap().trim();
-                if let Some(last) = session.history().iter().rev().find(|m| m.role == crate::generation::chat::Role::Assistant) {
+                if let Some(last) = session
+                    .history()
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == crate::generation::chat::Role::Assistant)
+                {
                     std::fs::write(path, &last.content)?;
                     println!("\x1b[33m[Saved to {}]\x1b[0m\n", path);
                 } else {

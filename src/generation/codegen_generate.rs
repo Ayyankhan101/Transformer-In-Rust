@@ -34,6 +34,12 @@ pub struct CollectStream {
     pub tokens: Vec<u32>,
 }
 
+impl Default for CollectStream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CollectStream {
     pub fn new() -> Self {
         Self { tokens: Vec::new() }
@@ -101,7 +107,12 @@ impl CodeGenGenerator {
         max_new_tokens: usize,
     ) -> Self {
         Self {
-            model, temperature, top_k, top_p, repetition_penalty, max_new_tokens,
+            model,
+            temperature,
+            top_k,
+            top_p,
+            repetition_penalty,
+            max_new_tokens,
             tokenizer: None,
             template: PromptTemplate::Completion,
         }
@@ -119,14 +130,28 @@ impl CodeGenGenerator {
         self
     }
 
-    pub fn set_temperature(&mut self, t: f64) { self.temperature = t; }
-    pub fn set_top_k(&mut self, k: usize) { self.top_k = k; }
-    pub fn set_top_p(&mut self, p: f64) { self.top_p = p; }
-    pub fn set_max_new_tokens(&mut self, n: usize) { self.max_new_tokens = n; }
-    pub fn set_repetition_penalty(&mut self, p: f64) { self.repetition_penalty = p; }
+    pub fn set_temperature(&mut self, t: f64) {
+        self.temperature = t;
+    }
+    pub fn set_top_k(&mut self, k: usize) {
+        self.top_k = k;
+    }
+    pub fn set_top_p(&mut self, p: f64) {
+        self.top_p = p;
+    }
+    pub fn set_max_new_tokens(&mut self, n: usize) {
+        self.max_new_tokens = n;
+    }
+    pub fn set_repetition_penalty(&mut self, p: f64) {
+        self.repetition_penalty = p;
+    }
 
-    pub fn temperature(&self) -> f64 { self.temperature }
-    pub fn max_new_tokens(&self) -> usize { self.max_new_tokens }
+    pub fn temperature(&self) -> f64 {
+        self.temperature
+    }
+    pub fn max_new_tokens(&self) -> usize {
+        self.max_new_tokens
+    }
 
     // ── Standard generate (collects all tokens) ──
 
@@ -149,12 +174,19 @@ impl CodeGenGenerator {
 
         let mut cache: Option<Vec<KVCache>> = None;
         let positions: Vec<usize> = (0..prompt_token_ids.len()).collect();
-        let logits = self.model.forward_with_cache(prompt_token_ids, &positions, &mut cache)?;
+        let logits = self
+            .model
+            .forward_with_cache(prompt_token_ids, &positions, &mut cache)?;
 
         let last_logits = logits.get(0)?.get(prompt_token_ids.len() - 1)?;
         let first_token = sample(
-            &last_logits, self.temperature, self.top_k, self.top_p,
-            self.repetition_penalty, prompt_token_ids, 42,
+            &last_logits,
+            self.temperature,
+            self.top_k,
+            self.top_p,
+            self.repetition_penalty,
+            prompt_token_ids,
+            42,
         )?;
 
         let mut generated = prompt_token_ids.to_vec();
@@ -166,7 +198,10 @@ impl CodeGenGenerator {
             return Ok(());
         }
 
-        eprintln!("  [prefill done in {:.1}s]", gen_start.elapsed().as_secs_f64());
+        eprintln!(
+            "  [prefill done in {:.1}s]",
+            gen_start.elapsed().as_secs_f64()
+        );
 
         for step in 1..self.max_new_tokens {
             let step_start = std::time::Instant::now();
@@ -177,11 +212,18 @@ impl CodeGenGenerator {
             let token_logits = logits.get(0)?.get(0)?;
 
             let token_id = sample(
-                &token_logits, self.temperature, self.top_k, self.top_p,
-                self.repetition_penalty, &generated, 42,
+                &token_logits,
+                self.temperature,
+                self.top_k,
+                self.top_p,
+                self.repetition_penalty,
+                &generated,
+                42,
             )?;
 
-            if token_id == EOS_TOKEN_ID { break; }
+            if token_id == EOS_TOKEN_ID {
+                break;
+            }
 
             generated.push(token_id);
 
@@ -191,9 +233,11 @@ impl CodeGenGenerator {
                 break; // handler requested early stop
             }
 
-            eprintln!("  [token {step}/{len} in {:.1}s]",
+            eprintln!(
+                "  [token {step}/{len} in {:.1}s]",
                 step_start.elapsed().as_secs_f64(),
-                len = self.max_new_tokens);
+                len = self.max_new_tokens
+            );
         }
 
         Ok(())
@@ -201,7 +245,8 @@ impl CodeGenGenerator {
 
     /// Decode a single token ID to string, if a tokenizer is attached.
     fn decode_token(&self, token_id: u32) -> String {
-        self.tokenizer.as_ref()
+        self.tokenizer
+            .as_ref()
             .and_then(|tok| tok.decode(&[token_id]).ok())
             .unwrap_or_default()
     }

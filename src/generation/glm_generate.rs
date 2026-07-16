@@ -25,7 +25,16 @@ impl GLMGenerator {
         repetition_penalty: f64,
         max_new_tokens: usize,
     ) -> Self {
-        Self { model, temperature, top_k, top_p, repetition_penalty, max_new_tokens, eos_token_id: None, mask_token_id }
+        Self {
+            model,
+            temperature,
+            top_k,
+            top_p,
+            repetition_penalty,
+            max_new_tokens,
+            eos_token_id: None,
+            mask_token_id,
+        }
     }
 
     #[allow(dead_code)]
@@ -41,7 +50,8 @@ impl GLMGenerator {
 
         for _step in 0..self.max_new_tokens {
             let seq_len = generated.len();
-            let mask = crate::layers::attention::causal_mask(seq_len, device, candle_core::DType::F32)?;
+            let mask =
+                crate::layers::attention::causal_mask(seq_len, device, candle_core::DType::F32)?;
 
             let logits = self.model.forward(&generated, 0, &[], &mask)?;
 
@@ -84,11 +94,13 @@ impl GLMGenerator {
         let mask = build_glm_mask(context.len(), blank_lens, device)?;
 
         let mut blank_start = context.len();
-        for (_blank_idx, &blank_len) in blank_lens.iter().enumerate() {
+        for &blank_len in blank_lens.iter() {
             for pos_in_blank in 0..blank_len {
                 let position = blank_start + pos_in_blank;
 
-                let logits = self.model.forward(&all_tokens, context.len(), blank_lens, &mask)?;
+                let logits = self
+                    .model
+                    .forward(&all_tokens, context.len(), blank_lens, &mask)?;
 
                 let pos_logits = logits.get(0)?.get(position)?;
                 let token_id = sample(
@@ -109,5 +121,3 @@ impl GLMGenerator {
         Ok(all_tokens)
     }
 }
-
-

@@ -1,22 +1,22 @@
-/// CodeGen PyTorch .bin → safetensors Converter
-///
-/// Reads a HuggingFace PyTorch checkpoint (model-*.bin) for
-/// Salesforce/codegen-350M-multi and writes it as a safetensors file
-/// that can be loaded directly without the PyTorch pickle dependency.
-///
-/// Usage:
-///   cargo run --example convert_codegen_to_safetensors -- \
-///       /path/to/codegen_weights/pytorch_model.bin \
-///       /path/to/codegen_weights/model.safetensors
-///
-/// Then load in inference:
-///   cargo run --release -- --codegen --weights /path/to/codegen_weights/model.safetensors
+//! CodeGen PyTorch .bin → safetensors Converter
+//!
+//! Reads a HuggingFace PyTorch checkpoint (model-*.bin) for
+//! Salesforce/codegen-350M-multi and writes it as a safetensors file
+//! that can be loaded directly without the PyTorch pickle dependency.
+//!
+//! Usage:
+//!   cargo run --example convert_codegen_to_safetensors -- \
+//!       /path/to/codegen_weights/pytorch_model.bin \
+//!       /path/to/codegen_weights/model.safetensors
+//!
+//! Then load in inference:
+//!   cargo run --release -- --codegen --weights /path/to/codegen_weights/model.safetensors
 
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
-use candle_core::{Device, DType};
 use candle_core::pickle::PthTensors;
+use candle_core::{DType, Device};
 
 const SUPPORTED_DTYPES: &[&str] = &["F32", "F16", "BF16"];
 
@@ -45,7 +45,10 @@ fn main() -> anyhow::Result<()> {
         if let Some(d) = args.get(4).and_then(|s| parse_dtype(s)) {
             d
         } else {
-            eprintln!("Error: unsupported dtype. Choose from: {}", SUPPORTED_DTYPES.join(", "));
+            eprintln!(
+                "Error: unsupported dtype. Choose from: {}",
+                SUPPORTED_DTYPES.join(", ")
+            );
             std::process::exit(1);
         }
     } else {
@@ -94,7 +97,8 @@ fn main() -> anyhow::Result<()> {
     for name in &weight_names {
         println!("  Converting: {name}");
 
-        let tensor = pth.get(name)?
+        let tensor = pth
+            .get(name)?
             .ok_or_else(|| anyhow::anyhow!("Tensor '{name}' not found"))?;
 
         // Convert to target dtype
@@ -116,7 +120,12 @@ fn main() -> anyhow::Result<()> {
             _ => safetensors::Dtype::F32,
         };
 
-        stored.push(StoredTensor { name: name.clone(), data: bytes, shape, st_dtype });
+        stored.push(StoredTensor {
+            name: name.clone(),
+            data: bytes,
+            shape,
+            st_dtype,
+        });
     }
 
     // Serialize to safetensors
@@ -148,7 +157,7 @@ fn main() -> anyhow::Result<()> {
 
 /// Collect tensor names following the CodeGen-350M naming convention.
 fn collect_codegen_weight_names(pth: &PthTensors) -> anyhow::Result<Vec<String>> {
-    let expected_weights = [
+    let _expected_weights = [
         "transformer.wte.weight",
         "transformer.ln_f.weight",
         "transformer.ln_f.bias",
@@ -158,12 +167,22 @@ fn collect_codegen_weight_names(pth: &PthTensors) -> anyhow::Result<Vec<String>>
 
     // Try to detect number of layers
     let num_layers = (0..100)
-        .find(|&i| pth.get(&format!("transformer.h.{i}.ln_1.weight")).ok().flatten().is_none())
+        .find(|&i| {
+            pth.get(&format!("transformer.h.{i}.ln_1.weight"))
+                .ok()
+                .flatten()
+                .is_none()
+        })
         .unwrap_or(0);
 
     if num_layers == 0 {
         // Check at least layer 0 exists
-        if pth.get("transformer.h.0.ln_1.weight").ok().flatten().is_none() {
+        if pth
+            .get("transformer.h.0.ln_1.weight")
+            .ok()
+            .flatten()
+            .is_none()
+        {
             return Ok(Vec::new());
         }
     }
@@ -178,12 +197,16 @@ fn collect_codegen_weight_names(pth: &PthTensors) -> anyhow::Result<Vec<String>>
     ];
 
     let layer_patterns = [
-        "ln_1.weight", "ln_1.bias",
+        "ln_1.weight",
+        "ln_1.bias",
         "attn.qkv_proj.weight",
         "attn.out_proj.weight",
-        "ln_2.weight", "ln_2.bias",
-        "mlp.fc_in.weight", "mlp.fc_in.bias",
-        "mlp.fc_out.weight", "mlp.fc_out.bias",
+        "ln_2.weight",
+        "ln_2.bias",
+        "mlp.fc_in.weight",
+        "mlp.fc_in.bias",
+        "mlp.fc_out.weight",
+        "mlp.fc_out.bias",
     ];
 
     let mut names = Vec::new();
@@ -249,7 +272,12 @@ fn enumerate_and_save(
                 _ => safetensors::Dtype::F32,
             };
 
-            stored.push(StoredTensor { name: name.clone(), data: bytes, shape, st_dtype });
+            stored.push(StoredTensor {
+                name: name.clone(),
+                data: bytes,
+                shape,
+                st_dtype,
+            });
         }
     }
 
@@ -283,14 +311,14 @@ fn enumerate_and_save(
 
 /// Generate all expected CodeGen weight names for up to N layers
 fn generate_all_codegen_patterns(max_layers: usize) -> Vec<String> {
-    let mut names = Vec::new();
-
     // Root-level weights
-    names.push("transformer.wte.weight".to_string());
-    names.push("transformer.ln_f.weight".to_string());
-    names.push("transformer.ln_f.bias".to_string());
-    names.push("lm_head.weight".to_string());
-    names.push("lm_head.bias".to_string());
+    let mut names = vec![
+        "transformer.wte.weight".to_string(),
+        "transformer.ln_f.weight".to_string(),
+        "transformer.ln_f.bias".to_string(),
+        "lm_head.weight".to_string(),
+        "lm_head.bias".to_string(),
+    ];
 
     // Per-layer weights
     for i in 0..max_layers {
