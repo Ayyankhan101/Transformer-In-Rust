@@ -203,14 +203,13 @@ mod tests {
         let mut session = ChatSession::new(1024);
         session.add_user("Turn 1".to_string());
         session.add_assistant("Response 1".to_string());
-        session.add_user("Turn 2".to_string());
 
         let prompt = session.assemble_prompt("Turn 2");
         assert!(prompt.contains("<|user|>\nTurn 1\n"));
         assert!(prompt.contains("<|assistant|>\nResponse 1\n"));
-        // Current turn should be the last one
+        // assemble_prompt adds the current input as a new user turn
         let turns = prompt.matches("<|user|>").count();
-        assert_eq!(turns, 2); // history + current
+        assert_eq!(turns, 2); // Turn 1 from history + Turn 2 from assemble_prompt
     }
 
     #[test]
@@ -232,8 +231,11 @@ mod tests {
         session.add_assistant("Hello!".to_string());
 
         let formatted = session.format_history();
+        // Output contains ANSI color codes around labels
         assert!(formatted.contains("[System] Be helpful."));
-        assert!(formatted.contains("You: Hi"));
-        assert!(formatted.contains("Assistant: Hello!"));
+        assert!(formatted.contains("You:"));
+        assert!(formatted.contains("Hi"));
+        assert!(formatted.contains("Assistant:"));
+        assert!(formatted.contains("Hello!"));
     }
 }
