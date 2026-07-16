@@ -30,6 +30,7 @@ rand = "0.8"
 rand_distr = "0.4"
 bytemuck = "1.15"
 half = "2.7"
+clap = { version = "4", features = ["derive"] }
 axum = { version = "0.8", features = ["json"], optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 

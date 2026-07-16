@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod codegen;
 pub mod generation;
 pub mod glm;

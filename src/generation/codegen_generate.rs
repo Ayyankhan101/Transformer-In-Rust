@@ -125,6 +125,9 @@ impl CodeGenGenerator {
     pub fn set_max_new_tokens(&mut self, n: usize) { self.max_new_tokens = n; }
     pub fn set_repetition_penalty(&mut self, p: f64) { self.repetition_penalty = p; }
 
+    pub fn temperature(&self) -> f64 { self.temperature }
+    pub fn max_new_tokens(&self) -> usize { self.max_new_tokens }
+
     // ── Standard generate (collects all tokens) ──
 
     pub fn generate(&self, prompt_token_ids: &[u32]) -> Result<Vec<u32>> {

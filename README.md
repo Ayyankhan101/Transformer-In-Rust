@@ -242,20 +242,30 @@ hf download Salesforce/codegen-350M-multi --local-dir codegen_weights
 # Build in release mode (important — debug is 20x slower)
 cargo build --release
 
-# CodeGen-350M inference
-cargo run --release -- --codegen
+# Conversational code generation (multi-turn)
+cargo run --release -- chat
+
+# Single-shot code generation
+cargo run --release -- complete "def fibonacci(n):"
 
 # Interactive REPL
-cargo run --release -- --repl
+cargo run --release -- repl
 
-# GLM demos
-cargo run --release -- --glm-demo        # Forward pass
-cargo run --release -- --glm-train       # Training loop
-cargo run --release -- --glm-generate    # Causal generation
-cargo run --release -- --glm-fill-blanks # Blank-infilling
+# Model info and weight status
+cargo run --release -- info
 
-# Print model configs
-cargo run --release -- --info
+# Download CodeGen-350M weights
+cargo run --release -- download
+
+# HTTP inference server
+cargo run --release --features server -- serve --port 8080
+
+# GLM training demo
+cargo run --release -- glm-train --data-path data --steps 500
+
+# Global flags
+#   --f16              Use FP16 precision
+#   --weights-dir DIR  Path to weights (default: codegen_weights)
 ```
 
 ---
