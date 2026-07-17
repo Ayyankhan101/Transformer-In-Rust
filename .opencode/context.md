@@ -34,6 +34,12 @@
 - `docs/` — Tutorials and architecture documentation
 - `configs/` — train.yaml example config
 
+## Branch Structure
+- `develop` — Integration branch (all CI green)
+- `codegen` — Code generation work (CodeGen, inference, CLI)
+- `image-gen` — Image/SVG generation work (GPT-2 SVG model)
+- **Workflow**: Work on feature branches, sync with each other, merge to develop
+
 ## Conventions
 - Naming: snake_case for modules/functions, CamelCase for types
 - Error handling: candle_core::Result / anyhow::Result
@@ -65,3 +71,9 @@
 ## CodeGenGenerator Setters
 - set_temperature(&mut self, f64), set_top_k(&mut self, usize), set_top_p(&mut self, f64)
 - set_max_new_tokens(&mut self, usize), set_repetition_penalty(&mut self, f64)
+
+## Team Workflow
+1. **You (codegen)**: Work on `codegen` branch, own src/codegen/, src/generation/, src/commands/
+2. **Partner (image-gen)**: Work on `image-gen` branch, own src/svg/, src/image/
+3. **Sync**: Each branch pulls from the other before starting work
+4. **Integration**: Merge feature branches to `develop` for CI validation
