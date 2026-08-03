@@ -12,6 +12,7 @@ pub mod data;
 pub mod lr_scheduler;
 pub mod train;
 
+pub use config::TrainConfig;
 pub use config::TrainingConfig;
 #[allow(unused_imports)]
 pub use data::DataLoader;

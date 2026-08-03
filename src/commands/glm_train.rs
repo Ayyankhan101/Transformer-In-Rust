@@ -4,7 +4,7 @@ use anyhow::Result;
 use candle_core::Device;
 
 use crate::cli::Cli;
-use crate::training::{GLMTrainer, TrainingConfig};
+use crate::training::{GLMTrainer, TrainConfig};
 
 pub fn run(cli: &Cli, data_path: &str, steps: usize) -> Result<()> {
     let device = Device::Cpu;
@@ -12,15 +12,18 @@ pub fn run(cli: &Cli, data_path: &str, steps: usize) -> Result<()> {
 
     println!("\x1b[1mGLM Training Demo ({dtype_str})\x1b[0m\n");
 
-    let config = TrainingConfig {
-        data_dir: PathBuf::from(data_path),
-        max_steps: steps,
-        dtype: if cli.f16 {
-            "f16".to_string()
-        } else {
-            "f32".to_string()
+    let config = TrainConfig {
+        training: crate::training::TrainingConfig {
+            data_dir: PathBuf::from(data_path),
+            max_steps: steps,
+            dtype: if cli.f16 {
+                "f16".to_string()
+            } else {
+                "f32".to_string()
+            },
+            ..crate::training::TrainingConfig::default()
         },
-        ..TrainingConfig::default()
+        ..TrainConfig::default()
     };
 
     println!("GLM Config:");

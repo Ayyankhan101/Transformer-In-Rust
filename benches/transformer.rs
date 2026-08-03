@@ -1,6 +1,138 @@
 use candle_core::{DType, Device, Tensor};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
+fn bench_rope_2d(c: &mut Criterion) {
+    let device = Device::Cpu;
+    let mut group = c.benchmark_group("rope_2d");
+
+    for &hidden_dim in &[256, 512, 1024] {
+        let max_positions = 512;
+        let pos_1 = Tensor::randn(0.0f32, 0.02f32, (max_positions, hidden_dim), &device).unwrap();
+        let pos_2 = Tensor::randn(0.0f32, 0.02f32, (max_positions, hidden_dim), &device).unwrap();
+
+        for &seq_len in &[32, 64, 128] {
+            let pos_1_ids: Vec<u32> = (0..seq_len as u32).map(|i| i % 4).collect();
+            let pos_2_ids: Vec<u32> = (0..seq_len as u32).collect();
+
+            group.throughput(Throughput::Elements((seq_len * hidden_dim) as u64));
+            group.bench_with_input(
+                BenchmarkId::new("f32", format!("h{}_s{}", hidden_dim, seq_len)),
+                &(&pos_1, &pos_2, &pos_1_ids, &pos_2_ids, hidden_dim, seq_len),
+                |b, (pos_1, pos_2, pos_1_ids, pos_2_ids, hidden_dim, seq_len)| {
+                    b.iter(|| {
+                        let p1_tensor = Tensor::from_slice(pos_1_ids, *seq_len, &device).unwrap();
+                        let p2_tensor = Tensor::from_slice(pos_2_ids, *seq_len, &device).unwrap();
+                        let e1 = pos_1.index_select(&p1_tensor, 0).unwrap();
+                        let e2 = pos_2.index_select(&p2_tensor, 0).unwrap();
+                        e1.broadcast_add(&e2).unwrap().unsqueeze(0).unwrap()
+                    });
+                },
+            );
+        }
+    }
+    group.finish();
+}
+
+fn bench_kv_cache(c: &mut Criterion) {
+    let device = Device::Cpu;
+    let mut group = c.benchmark_group("kv_cache");
+
+    for &(n_heads, head_dim) in &[(8, 64), (16, 64), (8, 128)] {
+        let max_seq = 512;
+
+        group.bench_function(
+            BenchmarkId::new("append_1", format!("nh{}_hd{}", n_heads, head_dim)),
+            |b| {
+                let mut cache = candle_core::Tensor::zeros(
+                    (1, n_heads, max_seq, head_dim),
+                    DType::F32,
+                    &device,
+                )
+                .unwrap();
+                let mut pos = 0usize;
+                let k_new =
+                    Tensor::randn(0.0f32, 1.0f32, (1, n_heads, 1, head_dim), &device).unwrap();
+                let v_new =
+                    Tensor::randn(0.0f32, 1.0f32, (1, n_heads, 1, head_dim), &device).unwrap();
+
+                b.iter(|| {
+                    let end = pos + 1;
+                    cache = cache
+                        .slice_assign(&[0..1, 0..n_heads, pos..end, 0..head_dim], &k_new)
+                        .unwrap();
+                    pos = end;
+                    pos
+                });
+            },
+        );
+
+        group.bench_function(
+            BenchmarkId::new("append_8", format!("nh{}_hd{}", n_heads, head_dim)),
+            |b| {
+                let mut cache = candle_core::Tensor::zeros(
+                    (1, n_heads, max_seq, head_dim),
+                    DType::F32,
+                    &device,
+                )
+                .unwrap();
+                let mut pos = 0usize;
+                let k_new =
+                    Tensor::randn(0.0f32, 1.0f32, (1, n_heads, 8, head_dim), &device).unwrap();
+                let v_new =
+                    Tensor::randn(0.0f32, 1.0f32, (1, n_heads, 8, head_dim), &device).unwrap();
+
+                b.iter(|| {
+                    let end = pos + 8;
+                    cache = cache
+                        .slice_assign(&[0..1, 0..n_heads, pos..end, 0..head_dim], &k_new)
+                        .unwrap();
+                    pos = end;
+                    pos
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
+fn bench_quantized_matmul(c: &mut Criterion) {
+    let device = Device::Cpu;
+    let mut group = c.benchmark_group("quantized_matmul");
+
+    for &hidden_dim in &[256, 512, 1024] {
+        let weight = Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim), &device).unwrap();
+
+        group.throughput(Throughput::Elements(hidden_dim as u64));
+        group.bench_with_input(
+            BenchmarkId::new("f32", format!("h{}", hidden_dim)),
+            &(&weight, hidden_dim),
+            |b, (weight, hidden_dim)| {
+                b.iter(|| {
+                    let x = Tensor::randn(0.0f32, 1.0f32, (1, 1, *hidden_dim), &device).unwrap();
+                    x.broadcast_matmul(&weight.unsqueeze(0).unwrap()).unwrap()
+                });
+            },
+        );
+
+        // Simulate INT8 quantized matmul: round weights to simulate int8 precision loss
+        let weight_q = weight.round().unwrap();
+        group.throughput(Throughput::Elements(hidden_dim as u64));
+        group.bench_with_input(
+            BenchmarkId::new("i8_simulated", format!("h{}", hidden_dim)),
+            &(&weight_q, hidden_dim),
+            |b, (weight_q, hidden_dim)| {
+                b.iter(|| {
+                    let x = Tensor::randn(0.0f32, 1.0f32, (1, 1, *hidden_dim), &device).unwrap();
+                    let x_q = x.round().unwrap();
+                    x_q.broadcast_matmul(&weight_q.unsqueeze(0).unwrap())
+                        .unwrap()
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
 pub fn bench_attention(c: &mut Criterion) {
     let device = Device::Cpu;
     let mut group = c.benchmark_group("attention");
@@ -421,6 +553,9 @@ criterion_group!(
     bench_layernorm,
     bench_full_block,
     bench_e2e_inference,
-    bench_f16_vs_f32
+    bench_f16_vs_f32,
+    bench_rope_2d,
+    bench_kv_cache,
+    bench_quantized_matmul
 );
 criterion_main!(benches);

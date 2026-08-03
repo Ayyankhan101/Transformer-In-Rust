@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TrainConfig {
     pub model: ModelConfig,
     pub training: TrainingConfig,
@@ -65,6 +65,7 @@ pub struct TrainingConfig {
     pub save_optimizer_state: bool,
     pub keep_last_n_checkpoints: usize,
     pub dtype: String,
+    pub tokenizer_path: PathBuf,
 }
 
 impl Default for TrainingConfig {
@@ -93,27 +94,12 @@ impl Default for TrainingConfig {
             save_optimizer_state: true,
             keep_last_n_checkpoints: 3,
             dtype: "f32".to_string(),
+            tokenizer_path: PathBuf::from("codegen_weights/tokenizer.json"),
         }
     }
 }
 
 impl TrainingConfig {
-    pub fn to_glm_config(&self) -> crate::glm::config::GLMConfig {
-        crate::glm::config::GLMConfig {
-            vocab_size: 51200,
-            hidden_dim: 256,
-            num_layers: 6,
-            num_heads: 8,
-            ffn_dim: 1024,
-            max_seq_len: self.max_seq_len,
-            _dropout: 0.1,
-            eps: 1e-5,
-            blank_ratio: 0.15,
-            mask_ratio: 0.7,
-            _random_replace_ratio: 0.15,
-        }
-    }
-
     pub fn from_file<P: AsRef<std::path::Path>>(
         path: P,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -166,5 +152,102 @@ impl TrainConfig {
             mask_ratio: self.model.mask_ratio,
             _random_replace_ratio: self.model.random_replace_ratio,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_train_config() -> TrainConfig {
+        TrainConfig {
+            model: ModelConfig::default(),
+            training: TrainingConfig::default(),
+        }
+    }
+
+    #[test]
+    fn test_model_config_default() {
+        let config = ModelConfig::default();
+        assert_eq!(config.vocab_size, 51200);
+        assert_eq!(config.hidden_dim, 256);
+        assert_eq!(config.num_layers, 6);
+        assert_eq!(config.num_heads, 8);
+        assert_eq!(config.ffn_dim, 1024);
+        assert_eq!(config.max_seq_len, 512);
+        assert_eq!(config.dropout, 0.1);
+        assert_eq!(config.eps, 1e-5);
+    }
+
+    #[test]
+    fn test_training_config_default() {
+        let config = TrainingConfig::default();
+        assert_eq!(config.data_dir, PathBuf::from("data"));
+        assert_eq!(config.train_split, 0.95);
+        assert_eq!(config.seed, 42);
+        assert_eq!(config.learning_rate, 1e-4);
+        assert_eq!(config.max_grad_norm, 1.0);
+        assert_eq!(config.micro_batch_size, 1);
+        assert_eq!(config.gradient_accumulation_steps, 16);
+        assert_eq!(config.max_steps, 10000);
+    }
+
+    #[test]
+    fn test_lr_schedule_config_default() {
+        let config = LrScheduleConfig::default();
+        assert_eq!(config.schedule_type, "cosine");
+        assert_eq!(config.warmup_steps, 500);
+        assert_eq!(config.max_steps, 10000);
+        assert_eq!(config.min_lr_ratio, 0.1);
+    }
+
+    #[test]
+    fn test_train_config_to_glm_config() {
+        let train_config = TrainConfig {
+            model: ModelConfig {
+                vocab_size: 10000,
+                hidden_dim: 128,
+                num_layers: 4,
+                num_heads: 4,
+                ffn_dim: 256,
+                max_seq_len: 64,
+                dropout: 0.2,
+                eps: 1e-6,
+                blank_ratio: 0.2,
+                mask_ratio: 0.8,
+                random_replace_ratio: 0.1,
+            },
+            training: TrainingConfig::default(),
+        };
+
+        let glm_config = train_config.to_glm_config();
+        assert_eq!(glm_config.vocab_size, 10000);
+        assert_eq!(glm_config.hidden_dim, 128);
+        assert_eq!(glm_config.num_layers, 4);
+        assert_eq!(glm_config.num_heads, 4);
+        assert_eq!(glm_config.ffn_dim, 256);
+        assert_eq!(glm_config.max_seq_len, 64);
+        assert_eq!(glm_config._dropout, 0.2);
+        assert_eq!(glm_config.eps, 1e-6);
+    }
+
+    #[test]
+    fn test_train_config_serialization() {
+        let config = default_train_config();
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        let deserialized: TrainConfig = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(config.model.vocab_size, deserialized.model.vocab_size);
+        assert_eq!(
+            config.training.learning_rate,
+            deserialized.training.learning_rate
+        );
+    }
+
+    #[test]
+    fn test_train_config_clone() {
+        let config = default_train_config();
+        let cloned = config.clone();
+        assert_eq!(config.model.hidden_dim, cloned.model.hidden_dim);
+        assert_eq!(config.training.max_steps, cloned.training.max_steps);
     }
 }

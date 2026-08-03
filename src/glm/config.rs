@@ -42,3 +42,54 @@ impl GLMConfig {
         embed + pos_embed + per_layer * self.num_layers + lm_head
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = GLMConfig::default();
+        assert_eq!(config.vocab_size, 51200);
+        assert_eq!(config.hidden_dim, 256);
+        assert_eq!(config.num_layers, 6);
+        assert_eq!(config.num_heads, 8);
+        assert_eq!(config.ffn_dim, 1024);
+        assert_eq!(config.max_seq_len, 512);
+        assert_eq!(config.eps, 1e-5);
+    }
+
+    #[test]
+    fn test_param_count_estimate() {
+        let config = GLMConfig::default();
+        let params = config.param_count_estimate();
+        // Should be a reasonable number (millions)
+        assert!(params > 1_000_000);
+        assert!(params < 100_000_000);
+    }
+
+    #[test]
+    fn test_param_count_small_model() {
+        let config = GLMConfig {
+            vocab_size: 1000,
+            hidden_dim: 64,
+            num_layers: 2,
+            num_heads: 4,
+            ffn_dim: 128,
+            max_seq_len: 32,
+            ..Default::default()
+        };
+        let params = config.param_count_estimate();
+        // Small model should have fewer params
+        assert!(params < 10_000_000);
+    }
+
+    #[test]
+    fn test_config_clone() {
+        let config = GLMConfig::default();
+        let cloned = config.clone();
+        assert_eq!(config.vocab_size, cloned.vocab_size);
+        assert_eq!(config.hidden_dim, cloned.hidden_dim);
+        assert_eq!(config.num_layers, cloned.num_layers);
+    }
+}

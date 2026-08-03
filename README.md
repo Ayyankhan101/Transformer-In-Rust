@@ -9,7 +9,7 @@
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](https://www.rust-lang.org/)
 [![Candle](https://img.shields.io/badge/Candle-0.8-blue)](https://github.com/huggingface/candle)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-27%2F27%20✓-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-69%2F69%20✓-brightgreen)]()
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?logo=githubactions)](.github/workflows/ci.yml)
 
 <br>
@@ -484,20 +484,28 @@ cargo run --release -- glm-train --data-path data --steps 500
 cargo test
 ```
 
-**27 tests** covering:
+**69 tests** covering:
 
 | Module | Tests |
 |:-------|:------|
 | Embedding | Lookup correctness |
 | Attention | Causal mask shape + triangularity |
+| Block | Transformer block forward (no mask, with mask, SwiGLU, different sizes) |
 | FFN | GELU forward, SwiGLU gate |
 | Norm | LayerNorm, RMSNorm forward |
-| GLM | Causal forward, blank-infill forward, training loss, attention mask, safetensors save/load |
-| CodeGen | Blank-forward, RoPE no-segfault |
+| GLM Config | Defaults, param count estimate, clone |
+| GLM Positions | 2D positional encoding (context, blanks, shape consistency) |
+| GLM Model | Causal forward, blank-infill forward, training loss, attention mask, safetensors save/load |
+| CodeGen Config | Defaults, head_dim, HF config parsing |
+| CodeGen KV Cache | New, append, reset, dtype support |
+| CodeGen Model | Blank-forward, RoPE no-segfault |
 | Quantized | INT8 quantized linear roundtrip, ranking preservation |
 | Sampling | Argmax, temperature-zero |
+| Training Config | Defaults, YAML serialization, GLM config conversion |
+| Training Data | DataLoader, batch, truncation, split, reset |
 | Training | LR scheduler (cosine/linear/constant) |
 | Chat | Multi-turn session, system prompt, history formatting, clear |
+| GLM Generate | Generator new, causal generation, blank-infilling |
 
 ---
 

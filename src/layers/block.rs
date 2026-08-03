@@ -62,3 +62,76 @@ impl TransformerBlock {
         x.broadcast_add(&ffn_out)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layers::attention::causal_mask;
+
+    #[test]
+    fn test_transformer_block_new() {
+        let device = Device::Cpu;
+        let block =
+            TransformerBlock::new(128, 4, 256, NormType::RMSNorm, Activation::GELU, &device)
+                .unwrap();
+        // Block created successfully
+        let x = Tensor::randn(0.0f32, 1.0f32, (1, 4, 128), &device).unwrap();
+        let output = block.forward(&x, None).unwrap();
+        assert_eq!(output.dims(), &[1, 4, 128]);
+    }
+
+    #[test]
+    fn test_transformer_block_forward_no_mask() {
+        let device = Device::Cpu;
+        let block = TransformerBlock::new(64, 4, 128, NormType::RMSNorm, Activation::GELU, &device)
+            .unwrap();
+
+        let x = Tensor::randn(0.0f32, 1.0f32, (1, 8, 64), &device).unwrap();
+        let output = block.forward(&x, None).unwrap();
+        assert_eq!(output.dims(), &[1, 8, 64]);
+    }
+
+    #[test]
+    fn test_transformer_block_forward_with_mask() {
+        let device = Device::Cpu;
+        let block = TransformerBlock::new(64, 4, 128, NormType::RMSNorm, Activation::GELU, &device)
+            .unwrap();
+
+        let x = Tensor::randn(0.0f32, 1.0f32, (1, 8, 64), &device).unwrap();
+        let mask = causal_mask(8, &device, candle_core::DType::F32).unwrap();
+        let output = block.forward(&x, Some(&mask)).unwrap();
+        assert_eq!(output.dims(), &[1, 8, 64]);
+    }
+
+    #[test]
+    fn test_transformer_block_swiglu() {
+        let device = Device::Cpu;
+        let block =
+            TransformerBlock::new(64, 4, 128, NormType::RMSNorm, Activation::SwiGLU, &device)
+                .unwrap();
+
+        let x = Tensor::randn(0.0f32, 1.0f32, (1, 4, 64), &device).unwrap();
+        let output = block.forward(&x, None).unwrap();
+        assert_eq!(output.dims(), &[1, 4, 64]);
+    }
+
+    #[test]
+    fn test_transformer_block_different_sizes() {
+        let device = Device::Cpu;
+
+        // Small block
+        let block1 =
+            TransformerBlock::new(32, 2, 64, NormType::RMSNorm, Activation::GELU, &device).unwrap();
+        let x1 = Tensor::randn(0.0f32, 1.0f32, (1, 4, 32), &device).unwrap();
+        let out1 = block1.forward(&x1, None).unwrap();
+        assert_eq!(out1.dims(), &[1, 4, 32]);
+
+        // Larger block
+        let block2 =
+            TransformerBlock::new(256, 8, 512, NormType::RMSNorm, Activation::GELU, &device)
+                .unwrap();
+        let x2 = Tensor::randn(0.0f32, 1.0f32, (1, 16, 256), &device).unwrap();
+        let out2 = block2.forward(&x2, None).unwrap();
+        assert_eq!(out2.dims(), &[1, 16, 256]);
+    }
+}

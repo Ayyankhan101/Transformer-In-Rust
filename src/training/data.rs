@@ -160,3 +160,109 @@ pub fn split_train_eval(
     let eval = examples[split_idx..].to_vec();
     (train, eval)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_examples(count: usize) -> Vec<TrainingExample> {
+        (0..count)
+            .map(|i| TrainingExample {
+                tokens: vec![i as u32; 20],
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_data_loader_from_examples() {
+        let examples = make_examples(10);
+        let loader = DataLoader::from_examples(examples, 16, 42).unwrap();
+        assert_eq!(loader.len(), 10);
+        assert!(!loader.is_empty());
+    }
+
+    #[test]
+    fn test_data_loader_next_batch() {
+        let examples = make_examples(5);
+        let mut loader = DataLoader::from_examples(examples, 16, 42).unwrap();
+
+        let batch = loader.next_batch(3);
+        assert_eq!(batch.len(), 3);
+        for tokens in &batch {
+            assert_eq!(tokens.len(), 16);
+        }
+    }
+
+    #[test]
+    fn test_data_loader_wraps_around() {
+        let examples = make_examples(3);
+        let mut loader = DataLoader::from_examples(examples, 16, 42).unwrap();
+
+        // Get more than available examples
+        let batch = loader.next_batch(5);
+        assert_eq!(batch.len(), 5);
+    }
+
+    #[test]
+    fn test_data_loader_reset() {
+        let examples = make_examples(5);
+        let mut loader = DataLoader::from_examples(examples, 16, 42).unwrap();
+
+        loader.next_batch(3);
+        loader.reset();
+        assert_eq!(loader.current_idx, 0);
+    }
+
+    #[test]
+    fn test_data_loader_empty() {
+        let examples = vec![];
+        let loader = DataLoader::from_examples(examples, 16, 42).unwrap();
+        assert_eq!(loader.len(), 0);
+        assert!(loader.is_empty());
+    }
+
+    #[test]
+    fn test_data_loader_long_sequence_truncated() {
+        let examples = vec![TrainingExample {
+            tokens: vec![1; 100], // Longer than max_seq_len
+        }];
+        let mut loader = DataLoader::from_examples(examples, 16, 42).unwrap();
+
+        let batch = loader.next_batch(1);
+        assert_eq!(batch[0].len(), 16);
+    }
+
+    #[test]
+    fn test_split_train_eval() {
+        let examples = make_examples(10);
+        let (train, eval) = split_train_eval(&examples, 0.8);
+        assert_eq!(train.len() + eval.len(), 10);
+        assert!(!train.is_empty());
+        assert!(!eval.is_empty());
+    }
+
+    #[test]
+    fn test_split_train_eval_single() {
+        let examples = make_examples(1);
+        let (train, eval) = split_train_eval(&examples, 0.8);
+        assert_eq!(train.len(), 1);
+        assert!(eval.is_empty());
+    }
+
+    #[test]
+    fn test_split_train_eval_empty() {
+        let examples = vec![];
+        let (train, eval) = split_train_eval(&examples, 0.8);
+        assert!(train.is_empty());
+        assert!(eval.is_empty());
+    }
+
+    #[test]
+    fn test_training_example_clone() {
+        let ex = TrainingExample {
+            tokens: vec![1, 2, 3, 4, 5],
+        };
+        let cloned = ex.clone();
+        assert_eq!(ex.tokens, cloned.tokens);
+    }
+}

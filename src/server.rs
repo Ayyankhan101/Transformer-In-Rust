@@ -150,3 +150,52 @@ async fn generate(
         token_count,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_request_defaults() {
+        let req: GenerateRequest = serde_json::from_str(r#"{"prompt": "fn main()"}"#).unwrap();
+        assert_eq!(req.prompt, "fn main()");
+        assert_eq!(req.max_tokens, 128);
+        assert_eq!(req.temperature, 0.8);
+        assert_eq!(req.top_k, 40);
+        assert_eq!(req.top_p, 0.9);
+    }
+
+    #[test]
+    fn test_generate_request_custom_values() {
+        let req: GenerateRequest = serde_json::from_str(
+            r#"{"prompt": "hello", "max_tokens": 256, "temperature": 0.5, "top_k": 10, "top_p": 0.8}"#,
+        )
+        .unwrap();
+        assert_eq!(req.max_tokens, 256);
+        assert_eq!(req.temperature, 0.5);
+        assert_eq!(req.top_k, 10);
+        assert_eq!(req.top_p, 0.8);
+    }
+
+    #[test]
+    fn test_generate_response_serialization() {
+        let resp = GenerateResponse {
+            generated: "world".to_string(),
+            tokens: vec![1, 2, 3],
+            token_count: 3,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("world"));
+        assert!(json.contains("token_count"));
+    }
+
+    #[test]
+    fn test_health_response() {
+        let resp = HealthResponse {
+            status: "ok".to_string(),
+            model: "CodeGen-350M".to_string(),
+        };
+        assert_eq!(resp.status, "ok");
+        assert_eq!(resp.model, "CodeGen-350M");
+    }
+}

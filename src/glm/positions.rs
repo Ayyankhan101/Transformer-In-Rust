@@ -68,3 +68,58 @@ impl GLMPositionEncoding {
         combined.unsqueeze(0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_position_encoding_new() {
+        let device = Device::Cpu;
+        let pos_enc = GLMPositionEncoding::new(128, 256, &device).unwrap();
+        assert_eq!(pos_enc.pos_1_embedding.dims(), &[128, 256]);
+        assert_eq!(pos_enc.pos_2_embedding.dims(), &[128, 256]);
+    }
+
+    #[test]
+    fn test_position_encoding_context_only() {
+        let device = Device::Cpu;
+        let pos_enc = GLMPositionEncoding::new(64, 128, &device).unwrap();
+
+        // Context only (no blanks)
+        let result = pos_enc.forward(4, &[], &device).unwrap();
+        assert_eq!(result.dims(), &[1, 4, 128]);
+    }
+
+    #[test]
+    fn test_position_encoding_with_blanks() {
+        let device = Device::Cpu;
+        let pos_enc = GLMPositionEncoding::new(64, 128, &device).unwrap();
+
+        // Context of length 3, blanks of length [2, 1]
+        let result = pos_enc.forward(3, &[2, 1], &device).unwrap();
+        // Total: 3 + 2 + 1 = 6
+        assert_eq!(result.dims(), &[1, 6, 128]);
+    }
+
+    #[test]
+    fn test_position_encoding_shape_consistency() {
+        let device = Device::Cpu;
+        let pos_enc = GLMPositionEncoding::new(32, 64, &device).unwrap();
+
+        // Different blank configurations
+        let r1 = pos_enc.forward(5, &[3], &device).unwrap();
+        let r2 = pos_enc.forward(2, &[1, 2], &device).unwrap();
+
+        assert_eq!(r1.dims(), &[1, 8, 64]); // 5 + 3
+        assert_eq!(r2.dims(), &[1, 5, 64]); // 2 + 1 + 2
+    }
+
+    #[test]
+    fn test_position_encoding_different_dims() {
+        let device = Device::Cpu;
+        let pos_enc = GLMPositionEncoding::new(16, 32, &device).unwrap();
+        let result = pos_enc.forward(2, &[2], &device).unwrap();
+        assert_eq!(result.dims(), &[1, 4, 32]);
+    }
+}

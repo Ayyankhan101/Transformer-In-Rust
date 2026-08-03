@@ -62,3 +62,83 @@ impl CodeGenConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = CodeGenConfig::default();
+        assert_eq!(config.vocab_size, 50400);
+        assert_eq!(config.hidden_dim, 1024);
+        assert_eq!(config.num_layers, 20);
+        assert_eq!(config.num_heads, 16);
+        assert_eq!(config.ffn_dim, 4096);
+        assert_eq!(config.max_seq_len, 2048);
+        assert_eq!(config.rotary_dim, 64);
+        assert_eq!(config.dtype, DType::F32);
+    }
+
+    #[test]
+    fn test_head_dim() {
+        let config = CodeGenConfig::default();
+        assert_eq!(config.head_dim(), 64); // 1024 / 16
+    }
+
+    #[test]
+    fn test_head_dim_small() {
+        let config = CodeGenConfig {
+            hidden_dim: 256,
+            num_heads: 8,
+            ..Default::default()
+        };
+        assert_eq!(config.head_dim(), 32); // 256 / 8
+    }
+
+    #[test]
+    fn test_from_hf_config() {
+        let json = serde_json::json!({
+            "vocab_size": 51200,
+            "n_embd": 768,
+            "n_layer": 12,
+            "n_head": 12,
+            "n_inner": 3072,
+            "n_positions": 1024,
+            "rotary_dim": 32
+        });
+        let config = CodeGenConfig::from_hf_config(&json);
+        assert_eq!(config.vocab_size, 51200);
+        assert_eq!(config.hidden_dim, 768);
+        assert_eq!(config.num_layers, 12);
+        assert_eq!(config.num_heads, 12);
+        assert_eq!(config.ffn_dim, 3072);
+        assert_eq!(config.max_seq_len, 1024);
+        assert_eq!(config.rotary_dim, 32);
+    }
+
+    #[test]
+    fn test_from_hf_config_defaults() {
+        let json = serde_json::json!({});
+        let config = CodeGenConfig::from_hf_config(&json);
+        assert_eq!(config.vocab_size, 50400);
+        assert_eq!(config.hidden_dim, 1024);
+        assert_eq!(config.num_layers, 20);
+        assert_eq!(config.num_heads, 16);
+        assert_eq!(config.ffn_dim, 4096); // hidden_dim * 4
+        assert_eq!(config.max_seq_len, 2048);
+        assert_eq!(config.rotary_dim, 64);
+    }
+
+    #[test]
+    fn test_from_hf_config_partial() {
+        let json = serde_json::json!({
+            "n_embd": 512,
+            "n_head": 8
+        });
+        let config = CodeGenConfig::from_hf_config(&json);
+        assert_eq!(config.hidden_dim, 512);
+        assert_eq!(config.num_heads, 8);
+        assert_eq!(config.ffn_dim, 2048); // 512 * 4 (default when n_inner missing)
+    }
+}

@@ -176,6 +176,7 @@ pub struct TrainableGLMModel {
     pub blocks: Vec<TrainableBlock>,
     pub final_norm: TrainableRMSNorm,
     pub lm_head: Var,
+    pub num_layers: usize,
 }
 
 impl TrainableGLMModel {
@@ -221,6 +222,7 @@ impl TrainableGLMModel {
             blocks,
             final_norm,
             lm_head: Var::from_tensor(&lm_t)?,
+            num_layers: config.num_layers,
         })
     }
 
@@ -312,7 +314,7 @@ impl TrainableGLMModel {
         names.push("embedding.weight".to_string());
         names.push("pos_1_embedding".to_string());
         names.push("pos_2_embedding".to_string());
-        for i in 0..6 {
+        for i in 0..self.num_layers {
             names.push(format!("h.{i}.norm1.weight"));
             names.push(format!("h.{i}.attn.qkv_weight"));
             names.push(format!("h.{i}.attn.out_weight"));

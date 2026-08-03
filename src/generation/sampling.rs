@@ -133,4 +133,70 @@ mod tests {
         assert_eq!(token, 99);
         Ok(())
     }
+
+    #[test]
+    fn test_repetition_penalty() -> Result<()> {
+        let device = Device::Cpu;
+        let data = vec![1.0f32; 10];
+        let logits = Tensor::from_vec(data, 10, &device)?;
+        let token = sample(&logits, 0.0, 10, 1.0, 2.0, &[5], 0)?;
+        assert_ne!(token, 5);
+        Ok(())
+    }
+
+    #[test]
+    fn test_top_k_filters_low_tokens() -> Result<()> {
+        let device = Device::Cpu;
+        let mut data = vec![0.0f32; 100];
+        data[0] = 10.0;
+        data[1] = 9.0;
+        data[2] = 8.0;
+        let logits = Tensor::from_vec(data, 100, &device)?;
+        let token = sample(&logits, 0.0, 3, 1.0, 1.0, &[], 0)?;
+        assert!(token <= 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_top_p_filters_tail() -> Result<()> {
+        let device = Device::Cpu;
+        let mut data = vec![0.0f32; 100];
+        data[0] = 10.0;
+        data[1] = 9.0;
+        let logits = Tensor::from_vec(data, 100, &device)?;
+        let token = sample(&logits, 1.0, 100, 0.5, 1.0, &[], 42)?;
+        assert!(token <= 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_uniform_distribution() -> Result<()> {
+        let device = Device::Cpu;
+        let data = vec![1.0f32; 10];
+        let logits = Tensor::from_vec(data, 10, &device)?;
+        let token = sample(&logits, 1.0, 10, 1.0, 1.0, &[], 0)?;
+        assert!(token < 10);
+        Ok(())
+    }
+
+    #[test]
+    fn test_single_token_vocab() -> Result<()> {
+        let device = Device::Cpu;
+        let data = vec![5.0f32];
+        let logits = Tensor::from_vec(data, 1, &device)?;
+        let token = sample(&logits, 1.0, 1, 1.0, 1.0, &[], 0)?;
+        assert_eq!(token, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_negative_logits() -> Result<()> {
+        let device = Device::Cpu;
+        let mut data = vec![-10.0f32; 50];
+        data[25] = -1.0;
+        let logits = Tensor::from_vec(data, 50, &device)?;
+        let token = sample(&logits, 0.0, 50, 1.0, 1.0, &[], 0)?;
+        assert_eq!(token, 25);
+        Ok(())
+    }
 }

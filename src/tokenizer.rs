@@ -25,3 +25,48 @@ impl CodeGenTokenizer {
             .map_err(|e| anyhow::anyhow!("{}", e))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_tokenizer_from_invalid_path() {
+        let result = CodeGenTokenizer::from_file("nonexistent_tokenizer.json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encode_empty_string() {
+        if !Path::new("codegen_weights/tokenizer.json").exists() {
+            eprintln!("Skipping: tokenizer not found");
+            return;
+        }
+        let tok = CodeGenTokenizer::from_file("codegen_weights/tokenizer.json").unwrap();
+        let ids = tok.encode("").unwrap();
+        assert!(ids.is_empty() || ids.len() <= 1);
+    }
+
+    #[test]
+    fn test_decode_empty_ids() {
+        if !Path::new("codegen_weights/tokenizer.json").exists() {
+            eprintln!("Skipping: tokenizer not found");
+            return;
+        }
+        let tok = CodeGenTokenizer::from_file("codegen_weights/tokenizer.json").unwrap();
+        let text = tok.decode(&[]).unwrap();
+        assert!(text.is_empty());
+    }
+
+    #[test]
+    fn test_encode_special_characters() {
+        if !Path::new("codegen_weights/tokenizer.json").exists() {
+            eprintln!("Skipping: tokenizer not found");
+            return;
+        }
+        let tok = CodeGenTokenizer::from_file("codegen_weights/tokenizer.json").unwrap();
+        let ids = tok.encode("<|endoftext|>").unwrap();
+        assert!(!ids.is_empty());
+    }
+}

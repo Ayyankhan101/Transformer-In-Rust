@@ -121,3 +121,63 @@ impl GLMGenerator {
         Ok(all_tokens)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::glm::config::GLMConfig;
+    use candle_core::Device;
+
+    fn small_config() -> GLMConfig {
+        GLMConfig {
+            vocab_size: 1000,
+            hidden_dim: 64,
+            num_layers: 2,
+            num_heads: 4,
+            ffn_dim: 128,
+            max_seq_len: 32,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_glm_generator_new() {
+        let device = Device::Cpu;
+        let config = small_config();
+        let model = GLMModel::new(config.clone(), &device).unwrap();
+        let gen = GLMGenerator::new(model, 999, 0.8, 40, 0.9, 1.1, 10);
+        assert_eq!(gen.max_new_tokens, 10);
+        assert_eq!(gen.mask_token_id, 999);
+        assert_eq!(gen.temperature, 0.8);
+    }
+
+    #[test]
+    fn test_glm_generator_generate_causal() {
+        let device = Device::Cpu;
+        let config = small_config();
+        let model = GLMModel::new(config, &device).unwrap();
+        let gen = GLMGenerator::new(model, 999, 0.0, 1, 1.0, 1.0, 5);
+
+        let prompt = vec![10, 20, 30];
+        let result = gen.generate(&prompt).unwrap();
+
+        // Should have prompt + generated tokens
+        assert!(result.len() >= prompt.len());
+        assert!(result.len() <= prompt.len() + 5);
+    }
+
+    #[test]
+    fn test_glm_generator_fill_blanks() {
+        let device = Device::Cpu;
+        let config = small_config();
+        let model = GLMModel::new(config, &device).unwrap();
+        let gen = GLMGenerator::new(model, 999, 0.0, 1, 1.0, 1.0, 5);
+
+        let context = vec![10, 20, 30, 40];
+        let blank_lens = vec![2, 1];
+        let result = gen.fill_blanks(&context, &blank_lens).unwrap();
+
+        // Should have context + blank tokens
+        assert_eq!(result.len(), 4 + 3); // 4 context + 2 + 1 blank
+    }
+}

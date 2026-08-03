@@ -11,7 +11,7 @@ use safetensors::SafeTensors;
 use crate::glm::config::GLMConfig;
 use crate::glm::trainable::TrainableGLMModel;
 use crate::tokenizer::CodeGenTokenizer;
-use crate::training::config::TrainingConfig;
+use crate::training::config::{TrainConfig, TrainingConfig};
 use crate::training::data::{
     download_default_data, split_train_eval, DataLoader, TrainingExample as DataTrainingExample,
 };
@@ -33,9 +33,10 @@ pub struct GLMTrainer {
 }
 
 impl GLMTrainer {
-    pub fn from_config(train_config: &TrainingConfig, device: &Device) -> Result<Self> {
+    pub fn from_config(train_config: &TrainConfig, device: &Device) -> Result<Self> {
         let glm_config = train_config.to_glm_config();
-        let dtype = match train_config.dtype.as_str() {
+        let tc = &train_config.training;
+        let dtype = match tc.dtype.as_str() {
             "f16" => DType::F16,
             _ => DType::F32,
         };
@@ -46,22 +47,26 @@ impl GLMTrainer {
         let optimizer = AdamW::new(
             params,
             ParamsAdamW {
-                lr: train_config.learning_rate,
-                weight_decay: train_config.weight_decay,
-                beta1: train_config.beta1,
-                beta2: train_config.beta2,
-                eps: train_config.eps,
+                lr: tc.learning_rate,
+                weight_decay: tc.weight_decay,
+                beta1: tc.beta1,
+                beta2: tc.beta2,
+                eps: tc.eps,
             },
         )?;
 
-        let lr_scheduler = LrScheduler::new(train_config.learning_rate, &train_config.lr_schedule);
+        let lr_scheduler = LrScheduler::new(tc.learning_rate, &tc.lr_schedule);
 
-        let tokenizer = CodeGenTokenizer::from_file("codegen_weights/tokenizer.json")
-            .map_err(|e| candle_core::Error::Msg(format!("Failed to load tokenizer: {e}")))?;
+        let tokenizer = CodeGenTokenizer::from_file(
+            tc.tokenizer_path
+                .to_str()
+                .unwrap_or("codegen_weights/tokenizer.json"),
+        )
+        .map_err(|e| candle_core::Error::Msg(format!("Failed to load tokenizer: {e}")))?;
 
         Ok(Self {
             model,
-            config: train_config.clone(),
+            config: tc.clone(),
             glm_config,
             optimizer,
             lr_scheduler,
@@ -265,7 +270,7 @@ impl GLMTrainer {
         })?;
 
         let params = self.model.param_vars();
-        let names = param_names();
+        let names = param_names(self.glm_config.num_layers);
 
         // Save as safetensors
         let mut tensor_data = Vec::new();
@@ -428,12 +433,12 @@ fn cross_entropy_loss(logits: &Tensor, labels: &[i64]) -> Result<Tensor> {
     Tensor::new(total_loss, logits.device())
 }
 
-fn param_names() -> Vec<String> {
+fn param_names(num_layers: usize) -> Vec<String> {
     let mut names = Vec::new();
     names.push("embedding.weight".to_string());
     names.push("pos_1_embedding".to_string());
     names.push("pos_2_embedding".to_string());
-    for i in 0..6 {
+    for i in 0..num_layers {
         names.push(format!("h.{i}.norm1.weight"));
         names.push(format!("h.{i}.attn.qkv_weight"));
         names.push(format!("h.{i}.attn.out_weight"));
@@ -495,7 +500,7 @@ fn load_safetensors(path: &Path, model: &mut TrainableGLMModel) -> Result<()> {
         .map_err(|e| candle_core::Error::Msg(format!("Failed to deserialize: {e}")))?;
 
     let params = model.param_vars();
-    let names = param_names();
+    let names = param_names(model.num_layers);
 
     for (i, var) in params.iter().enumerate() {
         let name = names.get(i).map(|s| s.as_str()).unwrap_or("unknown");

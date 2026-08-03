@@ -59,3 +59,76 @@ impl KVCache {
         self.pos
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_kv_cache_new() {
+        let device = Device::Cpu;
+        let cache = KVCache::new(128, 8, 64, DType::F32, &device).unwrap();
+        assert_eq!(cache.position(), 0);
+    }
+
+    #[test]
+    fn test_kv_cache_append_single() {
+        let device = Device::Cpu;
+        let mut cache = KVCache::new(128, 2, 4, DType::F32, &device).unwrap();
+
+        // Append 1 token
+        let k_new = Tensor::randn(0.0f32, 1.0f32, (1, 2, 1, 4), &device).unwrap();
+        let v_new = Tensor::randn(0.0f32, 1.0f32, (1, 2, 1, 4), &device).unwrap();
+
+        let (k, v) = cache.append(&k_new, &v_new).unwrap();
+        assert_eq!(cache.position(), 1);
+        assert_eq!(k.dims(), &[1, 2, 1, 4]);
+        assert_eq!(v.dims(), &[1, 2, 1, 4]);
+    }
+
+    #[test]
+    fn test_kv_cache_append_multiple() {
+        let device = Device::Cpu;
+        let mut cache = KVCache::new(128, 2, 4, DType::F32, &device).unwrap();
+
+        // Append 3 tokens
+        let k_new = Tensor::randn(0.0f32, 1.0f32, (1, 2, 3, 4), &device).unwrap();
+        let v_new = Tensor::randn(0.0f32, 1.0f32, (1, 2, 3, 4), &device).unwrap();
+
+        let (k, v) = cache.append(&k_new, &v_new).unwrap();
+        assert_eq!(cache.position(), 3);
+        assert_eq!(k.dims(), &[1, 2, 3, 4]);
+        assert_eq!(v.dims(), &[1, 2, 3, 4]);
+
+        // Append 2 more tokens
+        let k_new2 = Tensor::randn(0.0f32, 1.0f32, (1, 2, 2, 4), &device).unwrap();
+        let v_new2 = Tensor::randn(0.0f32, 1.0f32, (1, 2, 2, 4), &device).unwrap();
+
+        let (k2, v2) = cache.append(&k_new2, &v_new2).unwrap();
+        assert_eq!(cache.position(), 5);
+        assert_eq!(k2.dims(), &[1, 2, 5, 4]);
+        assert_eq!(v2.dims(), &[1, 2, 5, 4]);
+    }
+
+    #[test]
+    fn test_kv_cache_reset() {
+        let device = Device::Cpu;
+        let mut cache = KVCache::new(128, 2, 4, DType::F32, &device).unwrap();
+
+        let k_new = Tensor::randn(0.0f32, 1.0f32, (1, 2, 3, 4), &device).unwrap();
+        let v_new = Tensor::randn(0.0f32, 1.0f32, (1, 2, 3, 4), &device).unwrap();
+
+        cache.append(&k_new, &v_new).unwrap();
+        assert_eq!(cache.position(), 3);
+
+        cache.reset();
+        assert_eq!(cache.position(), 0);
+    }
+
+    #[test]
+    fn test_kv_cache_dtype_f16() {
+        let device = Device::Cpu;
+        let cache = KVCache::new(64, 4, 32, DType::F16, &device).unwrap();
+        assert_eq!(cache.position(), 0);
+    }
+}
