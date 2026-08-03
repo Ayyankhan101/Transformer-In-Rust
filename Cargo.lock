@@ -1907,7 +1907,7 @@ dependencies = [
  "criterion",
  "gemm 0.17.1",
  "half",
- "rand 0.8.7",
+ "rand 0.9.5",
  "rand_distr 0.4.3",
  "safetensors",
  "serde",
