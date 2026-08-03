@@ -37,5 +37,5 @@ axum = { version = "0.8", features = ["json"], optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.8"
 tempfile = "3.8"
