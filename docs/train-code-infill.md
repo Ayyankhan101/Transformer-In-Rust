@@ -79,13 +79,13 @@ training:
 ### Start training with YAML config:
 
 ```bash
-cargo run --release -- --glm-train --config configs/train.yaml
+cargo run --release -- glm-train --data-path training_data --steps 5000
 ```
 
 ### Or with defaults (auto-downloads training data):
 
 ```bash
-cargo run --release -- --glm-train
+cargo run --release -- glm-train
 ```
 
 ### What you'll see:
@@ -136,10 +136,10 @@ The DataLoader splits data at the file level (80/20 train/eval by default), then
 After training completes, test with:
 
 ```bash
-cargo run --release -- --glm-fill-blanks
+cargo run --release -- complete "def fibonacci(n):"
 ```
 
-This loads the latest checkpoint and generates blank-infilling completions.
+This loads the latest checkpoint and generates code completions.
 
 ---
 
@@ -168,7 +168,7 @@ This loads the latest checkpoint and generates blank-infilling completions.
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
-| `No data files found` | Empty data directory | Use `--download-data` or populate `training_data/` |
+| `No data files found` | Empty data directory | Use `--data-path` with a valid directory or populate `training_data/` |
 | Loss not decreasing | Learning rate too high/low | Adjust `learning_rate` (try 3e-4) |
 | Out of memory | Batch/sequence too large | Reduce `batch_size` or `max_seq_len` |
 | NaN loss | Gradient explosion | Reduce `learning_rate` or increase `warmup_steps` |

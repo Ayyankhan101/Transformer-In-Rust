@@ -2,9 +2,9 @@ name: Benchmarks
 
 on:
   push:
-    branches: [develop, main]
+    branches: [develop, main, codegen]
   pull_request:
-    branches: [develop, main]
+    branches: [develop, main, codegen]
   workflow_dispatch:
 
 concurrency:

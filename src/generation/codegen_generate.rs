@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use candle_core::Result;
 
 use crate::codegen::kv_cache::KVCache;

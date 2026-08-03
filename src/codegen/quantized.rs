@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! INT8 Dynamic Quantization for CodeGen-350M
 //!
 //! Quantizes linear layer weights from F32 to INT8 with per-channel scaling,

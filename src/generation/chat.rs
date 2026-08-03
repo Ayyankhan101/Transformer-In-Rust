@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::tokenizer::CodeGenTokenizer;
 
 /// Role of a message in the conversation.

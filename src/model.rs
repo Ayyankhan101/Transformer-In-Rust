@@ -1,3 +1,8 @@
+//! Model loading utilities for CodeGen-350M.
+//!
+//! Provides [`ModelContext`] for loading weights, tokenizer, and building
+//! the generator in a single call, eliminating boilerplate across commands.
+
 use std::path::Path;
 
 use anyhow::{bail, Result};

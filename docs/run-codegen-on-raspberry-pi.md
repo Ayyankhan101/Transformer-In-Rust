@@ -68,7 +68,10 @@ cd transformer-in-rust
 cargo build --release
 
 # Run with CodeGen
-cargo run --release -- --codegen
+cargo run --release -- complete "def fibonacci(n):"
+
+# Or use the interactive REPL
+cargo run --release -- repl
 ```
 
 ---
@@ -102,7 +105,7 @@ cargo run --release -- --codegen
 ### Use FP16 (half precision)
 
 ```bash
-cargo run --release -- --codegen --f16
+cargo run --release -- --f16 complete "def fibonacci(n):"
 ```
 
 This reduces memory by ~40% with minimal quality loss:
@@ -132,7 +135,7 @@ After=network.target
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/transformer-in-rust
-ExecStart=/home/pi/transformer-in-rust/target/release/rust_transformer --codegen --repl
+ExecStart=/home/pi/transformer-in-rust/target/release/rust_transformer repl
 Restart=on-failure
 RestartSec=5
 
@@ -167,4 +170,4 @@ sudo systemctl start codegen
 - Generation speed is ~0.3-0.8 tokens/second (usable for short completions)
 - Not suitable for real-time interactive use
 - Large context windows (>512 tokens) may cause OOM
-- INT8 quantization (when available) could double throughput
+- INT8 quantization can reduce memory by ~4x with minimal quality loss

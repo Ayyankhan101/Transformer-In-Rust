@@ -1,4 +1,12 @@
-#![allow(dead_code)]
+//! HTTP inference server for CodeGen-350M.
+//!
+//! Built with axum, this module provides a REST API for code generation.
+//! Requires the `server` feature flag.
+//!
+//! # Endpoints
+//!
+//! - `GET /health` — Health check
+//! - `POST /generate` — Generate code from prompt
 
 use std::net::SocketAddr;
 use std::sync::Arc;

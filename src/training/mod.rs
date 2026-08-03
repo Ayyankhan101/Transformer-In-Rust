@@ -1,3 +1,12 @@
+//! Training pipeline for GLM (General Language Model).
+//!
+//! Provides a complete training workflow including:
+//! - YAML-based configuration ([`config::TrainConfig`])
+//! - Data loading with train/eval split ([`data::DataLoader`])
+//! - Learning rate scheduling with warmup ([`lr_scheduler::LrScheduler`])
+//! - Gradient accumulation and clipping
+//! - Safetensors checkpoint save/load
+
 pub mod config;
 pub mod data;
 pub mod lr_scheduler;

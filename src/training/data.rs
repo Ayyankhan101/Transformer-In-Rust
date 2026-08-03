@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::tokenizer::CodeGenTokenizer;
 use candle_core::Result;
 use rand::rngs::StdRng;

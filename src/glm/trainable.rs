@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use candle_core::{DType, Device, Result, Tensor, Var};
 
 use safetensors::{serialize, SafeTensors};

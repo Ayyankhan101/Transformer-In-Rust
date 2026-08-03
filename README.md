@@ -9,7 +9,8 @@
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](https://www.rust-lang.org/)
 [![Candle](https://img.shields.io/badge/Candle-0.8-blue)](https://github.com/huggingface/candle)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-20%2F20%20✓-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-27%2F27%20✓-brightgreen)]()
+[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?logo=githubactions)](.github/workflows/ci.yml)
 
 <br>
 
@@ -28,11 +29,9 @@ Two transformer models share a hand-written layer library built with raw tensor 
 | **GLM** | Blank-infilling | ~14M | Training playground / demo |
 | **CodeGen-350M** | Causal decoder-only | 350M | Real code generation with pretrained weights |
 
-<br>
-
 ```mermaid
 graph LR
-    subgraph Shared["🔧 Shared Layer Library"]
+    subgraph Shared["Shared Layer Library"]
         E[Embedding]
         MHA[Multi-Head Attention]
         FFN[Feed-Forward Network<br/>SwiGLU / GELU]
@@ -40,16 +39,17 @@ graph LR
         TB[Transformer Block]
     end
 
-    subgraph GLM["🧠 GLM Model"]
+    subgraph GLM["GLM Model"]
         G1[2D Positional Encoding]
         G2[Blank-Infilling Mask]
         G3[Autoregressive Training]
     end
 
-    subgraph CodeGen["⚡ CodeGen-350M"]
+    subgraph CodeGen["CodeGen-350M"]
         C1[RoPE Rotary Embedding]
         C2[KV Cache]
         C3[Parallel Attn + FFN]
+        C4[INT8 Quantization]
     end
 
     E --> TB
@@ -165,7 +165,7 @@ graph TD
 | 37-token generation | ~3.2s |
 | GLM training step | ~0.02s |
 
-> ⚠️ Debug builds are ~20× slower.
+> ⚠️ Debug builds are ~20× slower. Always use `--release`.
 
 ---
 
@@ -173,8 +173,21 @@ graph TD
 
 ```mermaid
 graph TD
-    Main["main.rs<br/>CLI Dispatcher"]
+    Main["main.rs<br/>CLI Entry Point"]
+    Cli["cli.rs<br/>Clap Subcommands"]
+    Model["model.rs<br/>Model Context"]
     Tok["tokenizer.rs<br/>BPE Wrapper"]
+    Lib["lib.rs<br/>Library Root"]
+
+    subgraph Commands["src/commands/"]
+        Chat["chat.rs<br/>Multi-Turn Chat"]
+        Complete["complete.rs<br/>Single-Shot Gen"]
+        Repl["repl.rs<br/>Interactive REPL"]
+        Info["info.rs<br/>Model Info"]
+        Download["download.rs<br/>Weight Downloader"]
+        Serve["serve.rs<br/>HTTP Server"]
+        GlmTrain["glm_train.rs<br/>GLM Training"]
+    end
 
     subgraph Layers["src/layers/"]
         Att["attention.rs<br/>Fused QKV"]
@@ -189,6 +202,7 @@ graph TD
         GM["model.rs"]
         GAM["attention_mask.rs"]
         GP["positions.rs"]
+        GT["trainable.rs<br/>Trainable Wrapper"]
     end
 
     subgraph CGMod["src/codegen/"]
@@ -196,29 +210,43 @@ graph TD
         CM["model.rs"]
         CR["rotary.rs<br/>RoPE"]
         CW["weights.rs<br/>PyTorch Loader"]
+        CQ["quantized.rs<br/>INT8 Quantization"]
+        CK["kv_cache.rs"]
     end
 
     subgraph GenMod["src/generation/"]
-        CG["codegen_generate.rs<br/>Autoregressive + Sampling"]
+        CG["codegen_generate.rs<br/>Streaming + Sampling"]
         GGen["glm_generate.rs"]
+        ChatGen["chat.rs<br/>Chat Session"]
+        Samp["sampling.rs<br/>Rep Pen + Top-K/P"]
     end
 
     subgraph TrainMod["src/training/"]
-        TR["train.rs<br/>GLM Training Loop"]
+        TR["train.rs<br/>Training Loop"]
+        Conf["config.rs<br/>YAML Config"]
+        Data["data.rs<br/>DataLoader"]
+        LR["lr_scheduler.rs<br/>Cosine/Warmup"]
+        CP["checkpoint.rs<br/>Safetensors"]
     end
 
-    Main --> Tok
-    Main --> Layers
-    Main --> GLMMod
-    Main --> CGMod
-    Main --> GenMod
-    Main --> TrainMod
+    Server["server.rs<br/>HTTP Server (feature-gated)"]
+
+    Main --> Cli
+    Main --> Commands
+    Cli --> Model
+    Model --> Tok
+    Model --> Layers
+    Model --> CGMod
+    Lib --> GLMMod
+    Lib --> GenMod
+    Lib --> TrainMod
 
     style Layers fill:#1a1a2e,stroke:#e94560,color:#fff
     style GLMMod fill:#16213e,stroke:#0f3460,color:#fff
     style CGMod fill:#0f3460,stroke:#e94560,color:#fff
     style GenMod fill:#533483,stroke:#e94560,color:#fff
     style TrainMod fill:#1a1a2e,stroke:#0f3460,color:#fff
+    style Commands fill:#2d1b69,stroke:#e94560,color:#fff
 ```
 
 ---
@@ -228,11 +256,15 @@ graph TD
 ### Prerequisites
 
 - Rust 2021 edition
-- CodeGen-350M weights (797MB)
+- CodeGen-350M weights (797MB) — or use `download` command
 
 ### Download Weights
 
 ```bash
+# Option 1: Use the built-in download command
+cargo run --release -- download
+
+# Option 2: Manual download
 hf download Salesforce/codegen-350M-multi --local-dir codegen_weights
 ```
 
@@ -254,18 +286,126 @@ cargo run --release -- repl
 # Model info and weight status
 cargo run --release -- info
 
-# Download CodeGen-350M weights
-cargo run --release -- download
-
-# HTTP inference server
+# HTTP inference server (requires --features server)
 cargo run --release --features server -- serve --port 8080
 
 # GLM training demo
 cargo run --release -- glm-train --data-path data --steps 500
+```
 
-# Global flags
-#   --f16              Use FP16 precision
-#   --weights-dir DIR  Path to weights (default: codegen_weights)
+### Global Flags
+
+| Flag | Description |
+|:-----|:------------|
+| `--f16` | Use FP16 precision (faster, less memory) |
+| `--weights-dir DIR` | Path to weights directory (default: `codegen_weights`) |
+
+### Subcommand Reference
+
+| Command | Description | Options |
+|:--------|:------------|:--------|
+| `chat` | Multi-turn conversational code generation | `--system <prompt>` |
+| `complete <prompt>` | Single-shot code generation | `--max-tokens`, `--temperature`, `--template`, `--stream` |
+| `repl` | Interactive REPL (single-turn) | — |
+| `info` | Print model info and weight status | — |
+| `download` | Download CodeGen-350M weights from HuggingFace | — |
+| `serve` | Start HTTP inference server | `--port <PORT>` (default: 3000) |
+| `glm-train` | Train GLM on .py files from scratch | `--data-path`, `--steps` |
+
+### Prompt Templates
+
+The `complete` command supports three prompt templates:
+
+| Template | Description |
+|:---------|:------------|
+| `completion` | Raw prompt (default) |
+| `instruct` | Wraps prompt in instruction format |
+| `chat` | Wraps prompt in chat format |
+
+---
+
+## 🌐 HTTP Server
+
+Build with the `server` feature and start an axum-based inference server:
+
+```bash
+cargo run --release --features server -- serve --port 8080
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|:-------|:-----|:------------|
+| `GET` | `/health` | Health check |
+| `POST` | `/generate` | Generate code from prompt |
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8080/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "def fibonacci(n):", "max_tokens": 64, "temperature": 0.6}'
+```
+
+---
+
+## ⚖️ Quantization
+
+### INT8 Dynamic Quantization
+
+Per-channel INT8 quantization reduces model size by ~4x with minimal quality loss:
+
+- **Method**: Per-channel symmetric quantization with offset (u8 + 128)
+- **Compression**: ~4x for large linear layers
+- **Ranking**: Preserves relative token rankings
+
+### FP16 Inference
+
+Full dtype propagation through all layers — 23% speedup on CPU:
+
+```bash
+cargo run --release -- --f16 chat
+cargo run --release -- --f16 complete "def fibonacci(n):"
+```
+
+---
+
+## 🏋️ Training Pipeline
+
+The GLM model supports training from scratch with a production-grade pipeline:
+
+### Configuration
+
+```yaml
+# configs/train.yaml
+model:
+  hidden_dim: 256
+  num_layers: 6
+  num_heads: 8
+  ffn_dim: 1024
+  max_seq_len: 128
+  vocab_size: 16384
+
+training:
+  batch_size: 8
+  learning_rate: 0.0003
+  num_steps: 1000
+```
+
+### Features
+
+- **YAML config** — Declarative training configuration
+- **DataLoader** — Train/eval split, shuffling, random windowing
+- **LR Scheduler** — Cosine decay with linear warmup
+- **Safetensors Checkpoints** — Save/load model + optimizer state
+- **Gradient Accumulation** — Configurable accumulation steps
+- **Gradient Clipping** — By global norm
+- **Evaluation Loop** — Periodic validation with fixed seed
+
+### Quick Start
+
+```bash
+cargo run --release -- glm-train --data-path data --steps 500
 ```
 
 ---
@@ -306,6 +446,14 @@ cargo run --release -- glm-train --data-path data --steps 500
 - **Blank-Infilling** — Bidirectional context with causal within-blank masking
 - **Sampling Pipeline** — Repetition penalty → temperature → top-k → top-p → random sample
 - **Zero-Init Loading** — Avoids allocating 350M random floats before overwriting with weights
+- **FP16 Inference** — Full dtype propagation for 23% speedup
+- **INT8 Quantization** — Per-channel symmetric quantization, ~4x compression
+- **Token Streaming** — Stream tokens as they're generated
+- **Prompt Templates** — Completion, instruct, and chat templates
+- **Multi-Turn Chat** — Conversational code generation with history
+- **HTTP Server** — axum-based REST API (feature-gated)
+- **Training Pipeline** — YAML config, checkpoints, LR scheduler, gradient clipping
+- **Safetensors** — GLM save/load, PyTorch .bin converter
 
 ---
 
@@ -316,8 +464,17 @@ cargo run --release -- glm-train --data-path data --steps 500
 | [candle-core](https://crates.io/crates/candle-core) | 0.8 | Tensor ops, CPU backend, pickle loader |
 | [candle-nn](https://crates.io/crates/candle-nn) | 0.8 | Softmax, cross-entropy |
 | [tokenizers](https://crates.io/crates/tokenizers) | 0.21 | HuggingFace BPE tokenizer |
+| [clap](https://crates.io/crates/clap) | 4.0 | CLI argument parsing |
+| [serde](https://crates.io/crates/serde) | 1.0 | Serialization/deserialization |
+| [serde_json](https://crates.io/crates/serde_json) | 1.0 | JSON config parsing |
+| [serde_yaml](https://crates.io/crates/serde_yaml) | 0.9 | YAML training config |
 | [anyhow](https://crates.io/crates/anyhow) | 1.0 | Error handling |
-| [serde_json](https://crates.io/crates/serde_json) | 1.0 | Config parsing |
+| [safetensors](https://crates.io/crates/safetensors) | 0.4 | Model serialization |
+| [half](https://crates.io/crates/half) | 2.7 | FP16 support |
+| [rand](https://crates.io/crates/rand) | 0.8 | Random sampling |
+| [ureq](https://crates.io/crates/ureq) | 3.0 | HTTP client (weight download) |
+| [axum](https://crates.io/crates/axum) | 0.8 | HTTP server (optional) |
+| [tokio](https://crates.io/crates/tokio) | 1.0 | Async runtime (optional) |
 
 ---
 
@@ -327,7 +484,7 @@ cargo run --release -- glm-train --data-path data --steps 500
 cargo test
 ```
 
-**20 tests** covering:
+**27 tests** covering:
 
 | Module | Tests |
 |:-------|:------|
@@ -340,6 +497,7 @@ cargo test
 | Quantized | INT8 quantized linear roundtrip, ranking preservation |
 | Sampling | Argmax, temperature-zero |
 | Training | LR scheduler (cosine/linear/constant) |
+| Chat | Multi-turn session, system prompt, history formatting, clear |
 
 ---
 

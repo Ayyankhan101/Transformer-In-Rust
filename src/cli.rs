@@ -1,6 +1,15 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+/// Command-line interface for CodeGen-350M inference.
+///
+/// Supports conversational chat, single-shot completion, interactive REPL,
+/// HTTP server, and GLM training demos.
+///
+/// # Global Flags
+///
+/// - `--f16` — Use FP16 precision (faster, less memory)
+/// - `--weights-dir` — Path to weights directory (default: `codegen_weights`)
 #[derive(Parser)]
 #[command(
     name = "codegen",
@@ -20,6 +29,7 @@ pub struct Cli {
     pub command: Commands,
 }
 
+/// Available subcommands for the CodeGen CLI.
 #[derive(Subcommand)]
 pub enum Commands {
     /// Conversational code generation (multi-turn)

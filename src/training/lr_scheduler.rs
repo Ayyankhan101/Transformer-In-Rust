@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::training::config::LrScheduleConfig;
 
 pub struct LrScheduler {
