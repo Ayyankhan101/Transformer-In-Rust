@@ -48,7 +48,7 @@ impl GLMGenerator {
     /// No blanks — generates new tokens after the prompt.
     pub fn generate(&self, prompt_token_ids: &[u32]) -> Result<Vec<u32>> {
         let device = self.model.embedding.weight.device();
-        let mut rng = StdRng::from_entropy();
+        let mut rng = StdRng::from_os_rng();
         let mut generated = prompt_token_ids.to_vec();
 
         for _step in 0..self.max_new_tokens {
@@ -89,7 +89,7 @@ impl GLMGenerator {
     /// - earlier positions within the same blank (causal within-span)
     pub fn fill_blanks(&self, context: &[u32], blank_lens: &[usize]) -> Result<Vec<u32>> {
         let device = self.model.embedding.weight.device();
-        let mut rng = StdRng::from_entropy();
+        let mut rng = StdRng::from_os_rng();
         let total_blank_tokens: usize = blank_lens.iter().sum();
 
         let mut all_tokens = context.to_vec();

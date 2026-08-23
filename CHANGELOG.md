@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — dependencies
+- Took every open Dependabot bump in one pass: candle-core and candle-nn 0.8.4 to 0.11.0,
+  tokenizers 0.21.4 to 0.23.1, safetensors 0.4.5 to 0.8.0, rand 0.8 to 0.9, rand_distr 0.4
+  to 0.5, criterion 0.5 to 0.8, clap, bytemuck and tokio to their latest patch releases,
+  and actions/checkout, actions/github-script, actions/upload-artifact and
+  codecov/codecov-action in the workflows.
+- Three mechanical migrations were needed: `StdRng::from_entropy` became `from_os_rng`,
+  `Rng::gen`/`gen_range` became `random`/`random_range`, and
+  `safetensors::serialize` now takes an owned `Option` for its metadata argument.
+- The parity tests pass unchanged against candle 0.11, so the upgrade does not move the
+  numbers.
+
 ### Fixed — found while validating against the real 350M checkpoint
 - **`codegen download` reported success without downloading anything.**
   `huggingface-cli` has been renamed to `hf`; the old name now prints a deprecation

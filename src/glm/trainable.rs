@@ -349,7 +349,7 @@ impl TrainableGLMModel {
             );
         }
 
-        let bytes = serialize(&tensors, &None)?;
+        let bytes = serialize(&tensors, None)?;
         std::fs::write(path, bytes)
             .map_err(|e| candle_core::Error::Msg(format!("Failed to write safetensors: {e}")))?;
 
