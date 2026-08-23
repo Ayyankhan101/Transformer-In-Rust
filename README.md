@@ -420,7 +420,7 @@ training:
 - **YAML config** — Declarative training configuration via `--config`
 - **DataLoader** — Train/eval split, shuffling, random windowing
 - **LR Scheduler** — Cosine decay with linear warmup
-- **Safetensors Checkpoints** — Save/load model + optimizer state
+- **Safetensors Checkpoints** — Save/load weights, step counter and LR schedule
 - **Gradient Accumulation** — Configurable accumulation steps
 - **Gradient Clipping** — By global norm
 - **Evaluation Loop** — Periodic validation with fixed seed
@@ -433,7 +433,15 @@ cargo run --release -- glm-train --data-path data --steps 500
 
 # or drive it from a YAML config
 cargo run --release -- glm-train --config configs/train.yaml --steps 500
+
+# continue an earlier run
+cargo run --release -- glm-train --config configs/train.yaml --steps 1000 --resume
 ```
+
+Resume is opt-in. Without `--resume` an existing checkpoint directory is left alone and
+training starts from step 0. `--resume` restores the weights, the step counter and the
+learning-rate schedule position — but not AdamW's moments, which candle keeps private, so
+the loss rises briefly on the first steps after a resume.
 
 ---
 

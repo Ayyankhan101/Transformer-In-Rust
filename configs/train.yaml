@@ -50,9 +50,9 @@ training:
   log_every: 10
   eval_steps: 100
 
-  # Checkpointing
+  # Checkpointing. Resume with `glm-train --resume`; it restores weights, the step
+  # counter and the LR schedule, but not AdamW's moments.
   checkpoint_dir: "glm_checkpoint"
-  save_optimizer_state: true
   keep_last_n_checkpoints: 3
 
   # Precision

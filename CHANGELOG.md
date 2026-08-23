@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — checkpointing
+- **Resume was implicit and could silently do nothing.** `train()` loaded any checkpoint it
+  found with no flag and no way to opt out, restoring the step counter with it — so
+  re-running `glm-train --steps 80` after an 80-step run restored `step = 80`, fell straight
+  through the loop, and reported a successful run having trained nothing. Resume is now
+  opt-in via `--resume`, an ignored checkpoint directory is called out on stdout, and a
+  resumed run already at `max_steps` fails with both numbers named instead of exiting quietly.
+- **`save_checkpoint` fell back to the literal name `"unknown"`** when the parameter and
+  name lists disagreed in length, which collides in the safetensors map and silently drops
+  every parameter after the first. It now errors.
+
+### Removed — checkpointing
+- `save_optimizer_state`, which claimed to save optimizer state and wrote `{"step": N}`.
+  candle's `AdamW` keeps its moments in a private struct with no accessor, so honouring the
+  claim would mean writing and maintaining our own optimizer — not worth it for a CPU
+  playground. The config field, the `optimizer_step_*.json` file, the empty `if let` that
+  read it back, and the claim in the README are all gone; what resume does restore is now
+  documented.
+
 ### Changed — dependencies
 - Took every open Dependabot bump in one pass: candle-core and candle-nn 0.8.4 to 0.11.0,
   tokenizers 0.21.4 to 0.23.1, safetensors 0.4.5 to 0.8.0, rand 0.8 to 0.9, rand_distr 0.4

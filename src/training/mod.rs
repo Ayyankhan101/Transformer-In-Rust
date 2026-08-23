@@ -5,7 +5,7 @@
 //! - Data loading with train/eval split ([`data::DataLoader`])
 //! - Learning rate scheduling with warmup ([`lr_scheduler::LrScheduler`])
 //! - Gradient accumulation and clipping ([`train::clip_grad_norm`])
-//! - Safetensors checkpoint save/load
+//! - Safetensors checkpoint save/load, and opt-in resume ([`train::GLMTrainer::load_checkpoint`])
 
 pub mod config;
 pub mod data;
