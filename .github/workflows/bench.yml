@@ -19,7 +19,7 @@ jobs:
     name: Criterion Benchmarks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -33,7 +33,7 @@ jobs:
         run: cargo bench --bench transformer -- --warm-up-time 1 --measurement-time 1 --sample-size 10
 
       - name: Upload benchmark report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: criterion-report
           path: target/criterion/
@@ -41,7 +41,7 @@ jobs:
 
       - name: Post benchmark results (PR only)
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');

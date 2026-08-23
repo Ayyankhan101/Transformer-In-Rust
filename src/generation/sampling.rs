@@ -94,7 +94,7 @@ pub fn sample(
         *p /= sum;
     }
 
-    let r: f32 = rng.gen();
+    let r: f32 = rng.random();
 
     cumulative = 0.0;
     for &(idx, p) in &indexed {

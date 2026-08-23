@@ -46,12 +46,12 @@ fn corrupt(config: &GLMConfig, tokens: &[u32], rng: &mut impl Rng) -> (Vec<u32>,
     let mut labels = vec![-1i64; tokens.len()];
 
     for i in 0..tokens.len() {
-        if rng.gen::<f64>() < config.blank_ratio {
+        if rng.random::<f64>() < config.blank_ratio {
             labels[i] = tokens[i] as i64;
-            inputs[i] = if rng.gen::<f64>() < config.mask_ratio {
+            inputs[i] = if rng.random::<f64>() < config.mask_ratio {
                 mask_token_id
             } else {
-                rng.gen_range(0..config.vocab_size as u32)
+                rng.random_range(0..config.vocab_size as u32)
             };
         }
     }
@@ -538,7 +538,7 @@ fn save_safetensors(path: &Path, tensors: &[(String, &Tensor)]) -> Result<()> {
         );
     }
 
-    let bytes = serialize(tensor_map, &None)?;
+    let bytes = serialize(tensor_map, None)?;
     std::fs::write(path, bytes)
         .map_err(|e| candle_core::Error::Msg(format!("Failed to write safetensors: {e}")))?;
 

@@ -140,7 +140,7 @@ fn main() -> anyhow::Result<()> {
         tensor_map.insert(s.name.clone(), view);
     }
 
-    let serialized = safetensors::serialize(tensor_map, &None)
+    let serialized = safetensors::serialize(tensor_map, None)
         .map_err(|e| anyhow::anyhow!("Failed to serialize safetensors: {e}"))?;
 
     // Write to file
@@ -295,7 +295,7 @@ fn enumerate_and_save(
         tensor_map.insert(s.name.clone(), view);
     }
 
-    let serialized = safetensors::serialize(tensor_map, &None)
+    let serialized = safetensors::serialize(tensor_map, None)
         .map_err(|e| anyhow::anyhow!("Failed to serialize safetensors: {e}"))?;
 
     if let Some(parent) = output_path.parent() {

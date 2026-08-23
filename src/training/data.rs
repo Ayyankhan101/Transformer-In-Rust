@@ -66,7 +66,7 @@ impl DataLoader {
             let ex = &self.examples[self.current_idx];
             let tokens = if ex.tokens.len() > self.max_seq_len {
                 let max_start = ex.tokens.len() - self.max_seq_len;
-                let start = self.rng.gen_range(0..=max_start);
+                let start = self.rng.random_range(0..=max_start);
                 ex.tokens[start..start + self.max_seq_len].to_vec()
             } else {
                 ex.tokens.clone()
