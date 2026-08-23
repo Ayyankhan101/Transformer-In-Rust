@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — found while validating against the real 350M checkpoint
+- **`codegen download` reported success without downloading anything.**
+  `huggingface-cli` has been renamed to `hf`; the old name now prints a deprecation
+  notice, downloads nothing, and exits 0. The command believed the exit code and
+  printed "✓ Download complete!" over an empty directory. It now tries `hf` first and
+  verifies the file exists rather than trusting the status.
+- **`complete` printed nothing in its default streaming mode.**
+  `CodeGenGenerator::with_tokenizer` existed but was never called, so `decode_token`
+  returned an empty string for every token.
+- **`chat` sliced off the wrong tokens** — the same generated-only slicing bug fixed in
+  `complete`, `repl` and the server last pass, missed in this fourth call site.
+- **`-t` was bound to both `--temperature` and `--template`**, and `--stream` was a flag
+  with `default_value = "true"`, so it could never be false and the non-streaming branch
+  was unreachable. `--template` loses its short flag; `--stream` becomes `--no-stream`.
+- **`info` printed hardcoded model values** that had drifted from the checkpoint
+  (`max_seq_len` 1024 against the real 2048), while parsing the real config a few lines
+  later, and only looked for `pytorch_model.bin` so it missed a converted safetensors file.
+
 ### Fixed — training
 - **`glm-train` did not train.** Both cross-entropy paths accumulated into an `f32` and
   returned `Tensor::new(total, device)` — a fresh leaf with no autograd history — so
@@ -98,6 +116,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed unused `_dtype_str` variable in `model.rs`
 
 ### Added
+- `CodeGenTokenizer::vocab_size`, reported by `info`. CodeGen pads `vocab_size` to 51200
+  while the tokenizer stops at 50294; the 905 untrained rows never win a sample, verified
+  at temperature 2.0 with no top-k or nucleus cut, and an integration test keeps that true
+- Integration tests that run against the real checkpoint: sampling stays inside the
+  tokenizer's vocabulary, and a fixed seed reproduces while a different seed diverges
 - `WeightLoader::load_from_safetensors` and `WeightLoader::load` (format picked by
   extension). `examples/convert_codegen_to_safetensors.rs` wrote a file nothing in the repo
   could read; `ModelContext` now prefers `model.safetensors` over `pytorch_model.bin`

@@ -134,9 +134,9 @@ pub fn run(cli: &Cli, system: Option<String>) -> Result<()> {
         ctx.generator.generate_stream(&prompt_ids, &mut collector)?;
         let elapsed = start.elapsed();
 
-        let all_tokens = collector.tokens;
-        let generated_ids = &all_tokens[prompt_ids.len()..];
-        let response = ctx.tokenizer.decode(generated_ids)?;
+        // `generate_stream` reports generated tokens only; the prompt is not replayed.
+        let generated_ids = collector.tokens;
+        let response = ctx.tokenizer.decode(&generated_ids)?;
 
         if !response.is_empty() {
             println!("{response}");

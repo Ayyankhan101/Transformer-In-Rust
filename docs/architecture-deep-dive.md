@@ -335,7 +335,7 @@ Auto-cleanup keeps only the N most recent checkpoints.
 
 All weights and activations can use F16 (half precision):
 - **Memory**: ~50% reduction (700MB → 350MB for CodeGen)
-- **Speed**: ~23% faster on i5-6600 with `gemm` F16 support
+- **Speed**: 3.4x faster than F32 on CodeGen-350M (20.3 ms/token against 68.8 ms, Apple M1 Pro)
 - **Quality**: Negligible degradation for inference
 
 ```rust

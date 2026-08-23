@@ -235,3 +235,43 @@ fn safetensors_round_trip_matches_pytorch() {
         "safetensors round trip changed the logits by {diff}"
     );
 }
+
+/// The streaming callback must receive decoded text, not empty strings.
+///
+/// `CodeGenGenerator::with_tokenizer` existed but was never called, so
+/// `decode_token` always returned `""` and `complete` — which streams by default —
+/// printed nothing at all.
+#[test]
+fn streaming_handler_receives_decoded_text() {
+    let tokenizer_path = "codegen_weights/tokenizer.json";
+    if !Path::new(tokenizer_path).exists() {
+        eprintln!("Skipping: tokenizer not found");
+        return;
+    }
+    let tokenizer =
+        rust_transformer::tokenizer::CodeGenTokenizer::from_file(tokenizer_path).unwrap();
+
+    let f = load("tiny_h4");
+    let gen = CodeGenGenerator::new(f.model, 0.0, 1, 1.0, 1.0, 4).with_tokenizer(tokenizer);
+
+    #[derive(Default)]
+    struct Recorder {
+        texts: Vec<String>,
+    }
+    impl rust_transformer::generation::codegen_generate::StreamHandler for Recorder {
+        fn on_token(&mut self, _token: u32, text: &str) -> bool {
+            self.texts.push(text.to_string());
+            true
+        }
+    }
+
+    let mut recorder = Recorder::default();
+    gen.generate_stream(&f.tokens, &mut recorder)
+        .expect("generation failed");
+
+    assert_eq!(recorder.texts.len(), 4, "expected one callback per token");
+    assert!(
+        recorder.texts.iter().any(|t| !t.is_empty()),
+        "every streamed token decoded to an empty string"
+    );
+}

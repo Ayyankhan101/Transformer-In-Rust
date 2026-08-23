@@ -9,12 +9,12 @@
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](https://www.rust-lang.org/)
 [![Candle](https://img.shields.io/badge/Candle-0.8-blue)](https://github.com/huggingface/candle)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-98%2F98%20✓-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-102%2F102%20✓-brightgreen)]()
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?logo=githubactions)](.github/workflows/ci.yml)
 
 <br>
 
-*No GPU required. No Python runtime. Pure Rust tensor ops — 350M params on an i5-6600.*
+*No GPU required. No Python runtime. Pure Rust tensor ops — 350M params, 20 ms/token on a laptop CPU.*
 
 </div>
 
@@ -173,6 +173,25 @@ parameter count.
 Reproduce with `cargo bench --bench transformer`, or refresh this table with
 `bash scripts/update-readme-benchmarks.sh`.
 
+### CodeGen-350M, real weights
+
+`Salesforce/codegen-350M-multi`, 64 tokens from `def quicksort(arr):`, greedy,
+Apple M1 Pro:
+
+| | F32 | F16 |
+|:--|--:|--:|
+| Generation, 64 tokens | 4.4 s | **1.3 s** |
+| Per token | 68.8 ms | **20.3 ms** |
+| Wall clock including weight load | 5.0 s | 1.7 s |
+| Peak resident memory | 1.63 GB | 1.08 GB |
+
+Reproduce with:
+
+```bash
+cargo run --release -- download
+cargo run --release -- --f16 complete "def quicksort(arr):" --max-tokens 64 --temperature 0.0 --no-stream
+```
+
 > ⚠️ Debug builds are ~20× slower. Always use `--release`.
 
 ---
@@ -313,7 +332,7 @@ cargo run --release -- glm-train --data-path data --steps 500
 | Command | Description | Options |
 |:--------|:------------|:--------|
 | `chat` | Multi-turn conversational code generation | `--system <prompt>` |
-| `complete <prompt>` | Single-shot code generation | `--max-tokens`, `--temperature`, `--template`, `--stream` |
+| `complete <prompt>` | Single-shot code generation | `--max-tokens`, `--temperature`, `--template`, `--no-stream` |
 | `repl` | Interactive REPL (single-turn) | — |
 | `info` | Print model info and weight status | — |
 | `download` | Download CodeGen-350M weights from HuggingFace | — |
@@ -361,8 +380,9 @@ curl -X POST http://localhost:8080/generate \
 
 ### FP16 Inference
 
-Full dtype propagation through all layers, including blank-initialised models —
-about 30% faster than F32 on the benchmark prefill:
+Full dtype propagation through all layers, including blank-initialised models.
+On real CodeGen-350M weights it is **3.4× faster** than F32 (20.3 ms/token against
+68.8 ms) and uses a third less memory:
 
 ```bash
 cargo run --release -- --f16 chat

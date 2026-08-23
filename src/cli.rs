@@ -58,12 +58,14 @@ pub enum Commands {
         temperature: f64,
 
         /// Prompt template: completion, instruct, chat
-        #[arg(short, long, default_value = "completion")]
+        ///
+        /// No short flag: `-t` already belongs to `--temperature`.
+        #[arg(long, default_value = "completion")]
         template: String,
 
-        /// Stream tokens as they're generated
-        #[arg(long, default_value = "true")]
-        stream: bool,
+        /// Print the completion only when it is finished, instead of streaming it
+        #[arg(long)]
+        no_stream: bool,
     },
 
     /// Interactive REPL (single-turn)

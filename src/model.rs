@@ -59,7 +59,10 @@ impl ModelContext {
         let tokenizer = CodeGenTokenizer::from_file(tokenizer_path.to_str().unwrap())?;
         let model = WeightLoader::load(&weights_path, &config, &device)?;
 
-        let generator = CodeGenGenerator::new(model, temperature, 40, 0.9, 1.2, 256);
+        // Without this the generator has no tokenizer, so the streaming callback
+        // receives an empty string for every token and `complete` prints nothing.
+        let generator = CodeGenGenerator::new(model, temperature, 40, 0.9, 1.2, 256)
+            .with_tokenizer(tokenizer.clone());
 
         Ok(Self {
             generator,

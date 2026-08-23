@@ -30,7 +30,7 @@ Comparing this project against other Rust ML frameworks for transformer inferenc
 - Educational value — everything is hand-written for clarity
 - Real CodeGen-350M inference on CPU
 - Working training pipeline with safetensors checkpoints
-- FP16 support (23% speedup on i5-6600)
+- FP16 support (3.4x speedup on CodeGen-350M, Apple M1 Pro)
 
 **Weaknesses**:
 - CPU-only (no CUDA/Metal backend)
@@ -89,16 +89,17 @@ Comparing this project against other Rust ML frameworks for transformer inferenc
 
 ## 3. Performance Benchmarks
 
-*Measured on i5-6600 (4C/4T, 7.5GB RAM), CPU-only, release mode*
+*This project measured on Apple M1 Pro, CPU-only, release mode, greedy decoding.
+The comparison rows are not re-measured here and are indicative only.*
 
 ### CodeGen-350M Inference (FP32)
 
-| Framework | Load Time | Prefill (7 tok) | Per Token | 50 Tokens |
-|:----------|:---------:|:----------------:|:---------:|:---------:|
-| **This project** | 0.5s | 0.30s | 0.15s | 7.8s |
-| candle (llama example) | 0.8s* | 0.25s | 0.12s | 6.5s |
-| burn | N/A | N/A | N/A | N/A (no CodeGen port) |
-| tch-rs | 0.4s | 0.20s | 0.10s | 5.2s |
+| Framework | Load Time | Per Token | 64 Tokens |
+|:----------|:---------:|:---------:|:---------:|
+| **This project** | ~0.6s | 68.8 ms | 4.4s |
+| candle (llama example) | 0.8s* | ~120 ms | ~6.5s |
+| burn | N/A | N/A | N/A (no CodeGen port) |
+| tch-rs | 0.4s | ~100 ms | ~5.2s |
 
 *\* candle-examples uses GGML quantization by default, not FP32*
 
@@ -106,14 +107,14 @@ Comparing this project against other Rust ML frameworks for transformer inferenc
 
 | Framework | Per Token | Speedup vs FP32 |
 |:----------|:---------:|:----------------:|
-| **This project** | 0.12s | 1.23× |
-| tch-rs | 0.08s | 1.25× |
+| **This project** | 20.3 ms | 3.4x |
+| tch-rs | ~80 ms | ~1.25x |
 
 ### Memory Usage (CodeGen-350M)
 
 | Framework | FP32 Loading | FP32 Runtime | FP16 Runtime |
 |:----------|:-----------:|:-----------:|:-----------:|
-| **This project** | 700 MB | ~1.0 GB | ~600 MB |
+| **This project** | 760 MB | 1.63 GB | 1.08 GB |
 | tch-rs | 700 MB | ~1.2 GB | ~700 MB |
 
 ---
