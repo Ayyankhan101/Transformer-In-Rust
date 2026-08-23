@@ -1,4 +1,4 @@
-use candle_core::{DType, Device, Result, Tensor, Var};
+use candle_core::{Device, Result, Tensor, Var};
 
 use safetensors::{serialize, SafeTensors};
 use std::collections::HashMap;
@@ -333,67 +333,19 @@ impl TrainableGLMModel {
         let vars = self.param_vars();
         let names = self.param_names();
 
-        // Collect all tensor data first to keep it alive
         let mut tensor_data = Vec::new();
         for (name, var) in names.iter().zip(vars.iter()) {
             let tensor = var.as_tensor();
-            let dtype = tensor.dtype();
             let shape = tensor.shape().dims().to_vec();
-            println!(
-                "Processing tensor: {} shape={:?} dtype={:?}",
-                name, shape, dtype
-            );
-
-            // Convert tensor to bytes based on its dtype
-            let data: Vec<u8> = match dtype {
-                DType::F32 => {
-                    let flat = tensor.flatten_all()?;
-                    let vec: Vec<f32> = flat.to_vec1()?;
-                    bytemuck::cast_slice(&vec).to_vec()
-                }
-                DType::F16 => {
-                    let flat = tensor.flatten_all()?;
-                    let vec: Vec<half::f16> = flat.to_vec1()?;
-                    bytemuck::cast_slice(&vec).to_vec()
-                }
-                DType::BF16 => {
-                    let flat = tensor.flatten_all()?;
-                    let vec: Vec<half::bf16> = flat.to_vec1()?;
-                    bytemuck::cast_slice(&vec).to_vec()
-                }
-                _ => {
-                    return Err(candle_core::Error::Msg(format!(
-                        "Unsupported dtype: {:?}",
-                        dtype
-                    )))
-                }
-            };
-            println!("  -> data len: {}", data.len());
-            tensor_data.push((name.clone(), data, shape, dtype));
+            let (data, st_dtype) = crate::training::train::tensor_to_bytes(tensor)?;
+            tensor_data.push((name.clone(), data, shape, st_dtype));
         }
 
         let mut tensors = HashMap::new();
-        for (name, data, shape, dtype) in &tensor_data {
-            let st_dtype = match dtype {
-                DType::F32 => safetensors::Dtype::F32,
-                DType::F16 => safetensors::Dtype::F16,
-                DType::BF16 => safetensors::Dtype::BF16,
-                _ => {
-                    return Err(candle_core::Error::Msg(format!(
-                        "Unsupported dtype: {:?}",
-                        dtype
-                    )))
-                }
-            };
-            println!(
-                "Creating TensorView for {}: shape={:?}, data_len={}",
-                name,
-                shape,
-                data.len()
-            );
+        for (name, data, shape, st_dtype) in &tensor_data {
             tensors.insert(
                 name.clone(),
-                safetensors::tensor::TensorView::new(st_dtype, shape.to_vec(), data)?,
+                safetensors::tensor::TensorView::new(*st_dtype, shape.to_vec(), data)?,
             );
         }
 

@@ -2,9 +2,12 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use bytemuck;
-use candle_core::{DType, Device, Result, Tensor};
+use candle_core::backprop::GradStore;
+use candle_core::{DType, Device, Result, Tensor, Var};
 use candle_nn::{AdamW, Optimizer, ParamsAdamW};
 use half;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use safetensors::tensor::TensorView;
 use safetensors::SafeTensors;
 
@@ -15,6 +18,7 @@ use crate::training::config::{TrainConfig, TrainingConfig};
 use crate::training::data::{
     download_default_data, split_train_eval, DataLoader, TrainingExample as DataTrainingExample,
 };
+use crate::training::loss::cross_entropy_loss;
 use crate::training::lr_scheduler::LrScheduler;
 
 #[allow(dead_code)]
@@ -30,6 +34,28 @@ pub struct GLMTrainer {
     tokenizer: CodeGenTokenizer,
     dtype: DType,
     loss_history: VecDeque<f64>,
+    rng: StdRng,
+}
+
+/// Corrupt a sequence for masked denoising: some positions are replaced by the
+/// mask token or a random token, and their originals become the labels.
+/// Positions left alone get `-1`, which [`cross_entropy_loss`] ignores.
+fn corrupt(config: &GLMConfig, tokens: &[u32], rng: &mut impl Rng) -> (Vec<u32>, Vec<i64>) {
+    let mask_token_id = config.vocab_size as u32 - 1;
+    let mut inputs = tokens.to_vec();
+    let mut labels = vec![-1i64; tokens.len()];
+
+    for i in 0..tokens.len() {
+        if rng.gen::<f64>() < config.blank_ratio {
+            labels[i] = tokens[i] as i64;
+            inputs[i] = if rng.gen::<f64>() < config.mask_ratio {
+                mask_token_id
+            } else {
+                rng.gen_range(0..config.vocab_size as u32)
+            };
+        }
+    }
+    (inputs, labels)
 }
 
 impl GLMTrainer {
@@ -74,48 +100,66 @@ impl GLMTrainer {
             tokenizer,
             dtype,
             loss_history: VecDeque::with_capacity(100),
+            rng: StdRng::seed_from_u64(tc.seed),
         })
     }
 
-    pub fn train_step(&mut self, token_ids: &[u32], _device: &Device) -> Result<f64> {
-        let n = token_ids.len();
-        let mask_token_id = self.glm_config.vocab_size as u32 - 1;
+    /// Corrupt, forward, loss. The returned tensor stays connected to the
+    /// autograd graph — the caller owns the optimizer step.
+    pub fn compute_loss(&mut self, token_ids: &[u32]) -> Result<Tensor> {
+        let (input_ids, labels) = corrupt(&self.glm_config, token_ids, &mut self.rng);
+        let logits = self.model.forward_causal(&input_ids)?;
+        cross_entropy_loss(&logits, &labels)
+    }
 
-        let mut rng_state = self.step as u64;
-        let mut rand = || -> f64 {
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
-            (rng_state as f64) / (u64::MAX as f64)
-        };
+    /// Backward, clip by global norm, step. Advances the step counter and the
+    /// learning-rate schedule.
+    fn apply_gradients(&mut self, loss: &Tensor) -> Result<()> {
+        let mut grads = loss.backward()?;
+        let params = self.model.param_vars();
 
-        let mut input_ids = token_ids.to_vec();
-        let mut labels = vec![-1i64; n];
-
-        for i in 0..n {
-            let r = rand();
-            if r < self.glm_config.blank_ratio {
-                labels[i] = token_ids[i] as i64;
-                if rand() < self.glm_config.mask_ratio {
-                    input_ids[i] = mask_token_id;
-                } else {
-                    input_ids[i] = (rand() * self.glm_config.vocab_size as f64) as u32;
-                }
-            }
+        if self.config.max_grad_norm > 0.0 {
+            clip_grad_norm(&mut grads, &params, self.config.max_grad_norm)?;
         }
 
-        let logits = self.model.forward_causal(&input_ids)?;
-        let loss = cross_entropy_loss(&logits, &labels)?;
-
-        let loss_scalar = loss.to_scalar::<f32>()? as f64;
-
-        // backward_step does backward + step in one call
-        self.optimizer.backward_step(&loss)?;
-
-        // Update learning rate for next step
-        let current_lr = self.lr_scheduler.get_lr();
-        self.optimizer.set_learning_rate(current_lr);
+        // Set the rate this step will use, then step — the previous code set it
+        // afterwards, so every step ran on the preceding step's rate.
+        self.optimizer.set_learning_rate(self.lr_scheduler.get_lr());
+        self.optimizer.step(&grads)?;
 
         self.step += 1;
         self.lr_scheduler.step();
+        Ok(())
+    }
+
+    /// One optimizer step over `gradient_accumulation_steps` micro-batches of
+    /// `micro_batch_size` sequences each.
+    ///
+    /// Averaging the micro-batch losses and running a single backward is
+    /// equivalent to accumulating their gradients, and needs no `GradStore`
+    /// bookkeeping.
+    pub fn train_step(&mut self, loader: &mut DataLoader, _device: &Device) -> Result<f64> {
+        let accum_steps = self.config.gradient_accumulation_steps.max(1);
+        let mut losses: Vec<Tensor> = Vec::new();
+
+        for _ in 0..accum_steps {
+            for tokens in loader.next_batch(self.config.micro_batch_size) {
+                losses.push(self.compute_loss(&tokens)?);
+            }
+        }
+
+        if losses.is_empty() {
+            return Ok(0.0);
+        }
+
+        let mut total = losses[0].clone();
+        for loss in &losses[1..] {
+            total = (total + loss)?;
+        }
+        let loss = (total / losses.len() as f64)?;
+        let loss_scalar = loss.to_scalar::<f32>()? as f64;
+
+        self.apply_gradients(&loss)?;
 
         self.loss_history.push_back(loss_scalar);
         if self.loss_history.len() > 100 {
@@ -175,10 +219,8 @@ impl GLMTrainer {
 
         // Training loop
         while self.step < self.config.max_steps {
-            let batch = train_loader.next_batch(self.config.micro_batch_size);
-
-            for tokens in batch {
-                let loss = self.train_step(&tokens, device)?;
+            {
+                let loss = self.train_step(&mut train_loader, device)?;
 
                 // Logging
                 if self.step % self.config.log_every == 0 {
@@ -224,29 +266,9 @@ impl GLMTrainer {
         for _ in 0..self.config.eval_steps.min(eval_loader.len()) {
             let batch = eval_loader.next_batch(self.config.micro_batch_size);
             for tokens in batch {
-                let n = tokens.len();
-                let mask_token_id = self.glm_config.vocab_size as u32 - 1;
-
-                let mut input_ids = tokens.clone();
-                let mut labels = vec![-1i64; n];
-
-                // Use fixed seed for reproducible eval
-                let mut rng_state = 12345 + self.step as u64;
-                let mut rand = || -> f64 {
-                    rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
-                    (rng_state as f64) / (u64::MAX as f64)
-                };
-
-                for i in 0..n {
-                    if rand() < self.glm_config.blank_ratio {
-                        labels[i] = tokens[i] as i64;
-                        if rand() < self.glm_config.mask_ratio {
-                            input_ids[i] = mask_token_id;
-                        } else {
-                            input_ids[i] = (rand() * self.glm_config.vocab_size as f64) as u32;
-                        }
-                    }
-                }
+                // Fixed seed so eval loss is comparable across runs.
+                let mut eval_rng = StdRng::seed_from_u64(12345);
+                let (input_ids, labels) = corrupt(&self.glm_config, &tokens, &mut eval_rng);
 
                 let logits = self.model.forward_causal(&input_ids)?;
                 let loss = cross_entropy_loss(&logits, &labels)?;
@@ -410,27 +432,35 @@ impl GLMTrainer {
     }
 }
 
-fn cross_entropy_loss(logits: &Tensor, labels: &[i64]) -> Result<Tensor> {
-    let seq_len = logits.dims()[1];
-    let mut total_loss = 0.0f32;
-    let mut count = 0usize;
-
-    for (i, &label) in labels.iter().enumerate().take(seq_len) {
-        if label >= 0 {
-            let logits_i = logits.get(0)?.get(i)?;
-            let ce = candle_nn::ops::log_softmax(&logits_i, 0)?
-                .get(label as usize)?
-                .neg()?;
-            total_loss += ce.to_scalar::<f32>()?;
-            count += 1;
+/// Scale every gradient so the global L2 norm across `params` is at most
+/// `max_norm`. Returns the norm before clipping.
+pub fn grad_global_norm(grads: &GradStore, params: &[Var]) -> Result<f64> {
+    let mut sum_sq = 0f64;
+    for var in params {
+        if let Some(grad) = grads.get(var) {
+            sum_sq += grad
+                .sqr()?
+                .sum_all()?
+                .to_dtype(DType::F32)?
+                .to_scalar::<f32>()? as f64;
         }
     }
+    Ok(sum_sq.sqrt())
+}
 
-    if count > 0 {
-        total_loss /= count as f32;
+/// Clip gradients in place by global norm. Returns the norm before clipping.
+pub fn clip_grad_norm(grads: &mut GradStore, params: &[Var], max_norm: f64) -> Result<f64> {
+    let norm = grad_global_norm(grads, params)?;
+    if norm.is_finite() && norm > max_norm {
+        let scale = max_norm / norm;
+        for var in params {
+            let scaled = grads.get(var).map(|grad| grad * scale).transpose()?;
+            if let Some(scaled) = scaled {
+                grads.insert(var, scaled);
+            }
+        }
     }
-
-    Tensor::new(total_loss, logits.device())
+    Ok(norm)
 }
 
 fn param_names(num_layers: usize) -> Vec<String> {
@@ -452,6 +482,41 @@ fn param_names(num_layers: usize) -> Vec<String> {
     names
 }
 
+/// Flatten a tensor into safetensors bytes.
+///
+/// The previous version called `tensor.to_vec1::<u8>()`, which fails on anything
+/// of rank > 1 — so every checkpoint save errored with
+/// "unexpected rank, expected: 1, got: 2" the moment it reached a weight matrix.
+pub fn tensor_to_bytes(tensor: &Tensor) -> Result<(Vec<u8>, safetensors::Dtype)> {
+    let flat = tensor.flatten_all()?;
+    match tensor.dtype() {
+        DType::F32 => {
+            let values: Vec<f32> = flat.to_vec1()?;
+            Ok((
+                bytemuck::cast_slice(&values).to_vec(),
+                safetensors::Dtype::F32,
+            ))
+        }
+        DType::F16 => {
+            let values: Vec<half::f16> = flat.to_vec1()?;
+            Ok((
+                bytemuck::cast_slice(&values).to_vec(),
+                safetensors::Dtype::F16,
+            ))
+        }
+        DType::BF16 => {
+            let values: Vec<half::bf16> = flat.to_vec1()?;
+            Ok((
+                bytemuck::cast_slice(&values).to_vec(),
+                safetensors::Dtype::BF16,
+            ))
+        }
+        dtype => Err(candle_core::Error::Msg(format!(
+            "unsupported checkpoint dtype: {dtype:?}"
+        ))),
+    }
+}
+
 fn save_safetensors(path: &Path, tensors: &[(String, &Tensor)]) -> Result<()> {
     use safetensors::serialize;
     use std::collections::HashMap;
@@ -460,20 +525,8 @@ fn save_safetensors(path: &Path, tensors: &[(String, &Tensor)]) -> Result<()> {
     let mut tensor_data = Vec::new();
 
     for (name, tensor) in tensors {
-        let data = tensor.to_vec1::<u8>()?;
+        let (data, st_dtype) = tensor_to_bytes(tensor)?;
         let shape = tensor.shape().dims().to_vec();
-        let dtype = tensor.dtype();
-        let st_dtype = match dtype {
-            DType::F32 => safetensors::Dtype::F32,
-            DType::F16 => safetensors::Dtype::F16,
-            DType::BF16 => safetensors::Dtype::BF16,
-            _ => {
-                return Err(candle_core::Error::Msg(format!(
-                    "Unsupported dtype: {:?}",
-                    dtype
-                )))
-            }
-        };
         tensor_data.push((name.clone(), data, shape, st_dtype));
     }
 
@@ -562,4 +615,71 @@ fn load_data(data_dir: &Path, tokenizer: &CodeGenTokenizer) -> Result<Vec<DataTr
     }
 
     Ok(examples)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::training::loss::cross_entropy_loss;
+
+    #[test]
+    fn clipping_bounds_the_global_norm() -> Result<()> {
+        let device = Device::Cpu;
+        let config = GLMConfig {
+            vocab_size: 64,
+            hidden_dim: 32,
+            num_layers: 2,
+            num_heads: 4,
+            ffn_dim: 64,
+            max_seq_len: 16,
+            ..Default::default()
+        };
+        let model = TrainableGLMModel::new(config, &device)?;
+        let params = model.param_vars();
+
+        let logits = model.forward_causal(&[3u32, 9, 14, 2, 41])?;
+        let loss = cross_entropy_loss(&logits, &[1i64, 2, 3, 4, 5])?;
+        let mut grads = loss.backward()?;
+
+        let before = grad_global_norm(&grads, &params)?;
+        assert!(before > 0.0, "no gradients to clip");
+
+        let max_norm = before / 10.0;
+        let reported = clip_grad_norm(&mut grads, &params, max_norm)?;
+        assert!((reported - before).abs() < 1e-6);
+
+        let after = grad_global_norm(&grads, &params)?;
+        assert!(
+            (after - max_norm).abs() < 1e-4,
+            "clipped norm {after} should sit at the bound {max_norm}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn clipping_leaves_small_gradients_alone() -> Result<()> {
+        let device = Device::Cpu;
+        let config = GLMConfig {
+            vocab_size: 64,
+            hidden_dim: 32,
+            num_layers: 1,
+            num_heads: 4,
+            ffn_dim: 64,
+            max_seq_len: 16,
+            ..Default::default()
+        };
+        let model = TrainableGLMModel::new(config, &device)?;
+        let params = model.param_vars();
+
+        let logits = model.forward_causal(&[3u32, 9, 14])?;
+        let loss = cross_entropy_loss(&logits, &[1i64, 2, 3])?;
+        let mut grads = loss.backward()?;
+
+        let before = grad_global_norm(&grads, &params)?;
+        clip_grad_norm(&mut grads, &params, before * 10.0)?;
+        let after = grad_global_norm(&grads, &params)?;
+
+        assert!((after - before).abs() < 1e-6, "{before} changed to {after}");
+        Ok(())
+    }
 }

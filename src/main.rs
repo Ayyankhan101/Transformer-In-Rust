@@ -22,8 +22,10 @@ fn main() -> anyhow::Result<()> {
         Commands::Info => commands::info::run(&cli),
         Commands::Serve { port } => commands::serve::run(&cli, *port),
         Commands::Download => commands::download::run(&cli),
-        Commands::GlmTrain { data_path, steps } => {
-            commands::glm_train::run(&cli, data_path, *steps)
-        }
+        Commands::GlmTrain {
+            data_path,
+            steps,
+            config,
+        } => commands::glm_train::run(&cli, data_path, *steps, config.as_deref()),
     }
 }

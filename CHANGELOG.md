@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — training
+- **`glm-train` did not train.** Both cross-entropy paths accumulated into an `f32` and
+  returned `Tensor::new(total, device)` — a fresh leaf with no autograd history — so
+  `optimizer.backward_step(&loss)` received an empty gradient store and every step was a
+  no-op. Rebuilt from tensor operations around `candle_nn::loss::cross_entropy`. A real
+  80-step run now goes from loss 10.80 to 4.99; before the fix, 60 optimizer steps left
+  the loss at 4.1934047 both before and after.
+- **Every checkpoint save failed.** `save_safetensors` called `tensor.to_vec1::<u8>()`,
+  which errors on anything of rank > 1, so training ended in
+  "unexpected rank, expected: 1, got: 2" as soon as it reached a weight matrix.
+- **`configs/train.yaml` did not deserialize.** `eval_steps` sat under a separate
+  `evaluation:` section and `tokenizer_path` was absent. Nothing had ever loaded the file
+  because `glm-train` had no `--config` flag. Config structs now use `#[serde(default)]`,
+  so a partial YAML falls back to defaults field by field.
+- `gradient_accumulation_steps` and `max_grad_norm` were declared in `TrainingConfig` and
+  claimed here as delivered, but read nowhere. Both are now implemented:
+  `gradient_accumulation_steps` micro-batch losses are averaged into one backward, and
+  `clip_grad_norm` scales gradients to the global-norm bound.
+- The learning rate was set *after* `optimizer.step`, so every step ran on the previous
+  step's rate.
+- Masking used a hand-rolled LCG re-seeded from the step counter, so consecutive steps drew
+  near-identical corruption patterns. Replaced with one `StdRng` seeded from
+  `TrainingConfig::seed`.
+
+### Added — training
+- `--config <path>` on `glm-train`, using the existing `TrainConfig::from_file`. It was
+  marked done in the project notes but had never been wired to the CLI.
+- `src/training/loss.rs` with tests that fail if gradients stop reaching parameters, if a
+  tiny model stops memorising a batch, or if an optimizer step leaves weights unchanged
+- Gradient-clipping tests, and a test that `configs/train.yaml` actually parses
+
+### Removed — training
+- `src/training/checkpoint.rs` (192 lines): never declared in `mod.rs`, so it had never
+  been compiled, and it duplicated the checkpoint code in `train.rs`
+- Per-tensor `println!` debug output from `TrainableGLMModel::save_safetensors`
+- Three copies of the sequence-corruption logic and two of the tensor-to-safetensors
+  conversion, collapsed into one each
+
 ### Performance
 - **KV cache no longer rewrites itself on every token.** `KVCache::append` used
   `Tensor::slice_assign`, which is not a targeted write: candle zero-pads the source out

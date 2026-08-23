@@ -9,7 +9,7 @@
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](https://www.rust-lang.org/)
 [![Candle](https://img.shields.io/badge/Candle-0.8-blue)](https://github.com/huggingface/candle)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-89%2F89%20✓-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-98%2F98%20✓-brightgreen)]()
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?logo=githubactions)](.github/workflows/ci.yml)
 
 <br>
@@ -378,24 +378,26 @@ The GLM model supports training from scratch with a production-grade pipeline:
 ### Configuration
 
 ```yaml
-# configs/train.yaml
+# configs/train.yaml — every field is optional and falls back to its default
 model:
+  vocab_size: 51200
   hidden_dim: 256
   num_layers: 6
   num_heads: 8
   ffn_dim: 1024
-  max_seq_len: 128
-  vocab_size: 16384
+  max_seq_len: 512
 
 training:
-  batch_size: 8
-  learning_rate: 0.0003
-  num_steps: 1000
+  learning_rate: 1e-4
+  max_grad_norm: 1.0
+  micro_batch_size: 1              # sequences per forward pass
+  gradient_accumulation_steps: 32  # forward passes per optimizer step
+  max_steps: 10000
 ```
 
 ### Features
 
-- **YAML config** — Declarative training configuration
+- **YAML config** — Declarative training configuration via `--config`
 - **DataLoader** — Train/eval split, shuffling, random windowing
 - **LR Scheduler** — Cosine decay with linear warmup
 - **Safetensors Checkpoints** — Save/load model + optimizer state
@@ -406,7 +408,11 @@ training:
 ### Quick Start
 
 ```bash
+# defaults
 cargo run --release -- glm-train --data-path data --steps 500
+
+# or drive it from a YAML config
+cargo run --release -- glm-train --config configs/train.yaml --steps 500
 ```
 
 ---

@@ -91,5 +91,9 @@ pub enum Commands {
         /// Number of training steps
         #[arg(short, long, default_value = "1000")]
         steps: usize,
+
+        /// YAML training config (see configs/train.yaml). Defaults are used if omitted.
+        #[arg(short, long)]
+        config: Option<PathBuf>,
     },
 }

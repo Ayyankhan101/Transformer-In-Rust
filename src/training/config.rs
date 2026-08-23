@@ -2,12 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TrainConfig {
     pub model: ModelConfig,
     pub training: TrainingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ModelConfig {
     pub vocab_size: usize,
     pub hidden_dim: usize,
@@ -41,6 +43,7 @@ impl Default for ModelConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TrainingConfig {
     pub data_dir: PathBuf,
     pub download_if_empty: bool,
@@ -110,6 +113,7 @@ impl TrainingConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LrScheduleConfig {
     #[serde(rename = "type")]
     pub schedule_type: String,
@@ -249,5 +253,29 @@ mod tests {
         let cloned = config.clone();
         assert_eq!(config.model.hidden_dim, cloned.model.hidden_dim);
         assert_eq!(config.training.max_steps, cloned.training.max_steps);
+    }
+
+    /// The config the repo ships must actually deserialize. It did not: `eval_steps`
+    /// lived under a separate `evaluation:` section and `tokenizer_path` was absent,
+    /// and nothing loaded the file because `glm-train` had no `--config` flag.
+    #[test]
+    fn shipped_config_loads() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/configs/train.yaml");
+        let config = TrainConfig::from_file(path).expect("configs/train.yaml must parse");
+        assert_eq!(config.model.hidden_dim, 256);
+        assert_eq!(config.training.gradient_accumulation_steps, 32);
+        assert_eq!(config.training.max_grad_norm, 1.0);
+    }
+
+    /// A config naming only a couple of fields should fall back to defaults.
+    #[test]
+    fn partial_config_falls_back_to_defaults() {
+        let yaml = "training:\n  learning_rate: 0.5\n";
+        let config: TrainConfig = serde_yaml::from_str(yaml).expect("partial config must parse");
+        assert_eq!(config.training.learning_rate, 0.5);
+        assert_eq!(
+            config.training.micro_batch_size,
+            TrainingConfig::default().micro_batch_size
+        );
     }
 }
