@@ -1,4 +1,6 @@
 use candle_core::Result;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 use crate::codegen::kv_cache::KVCache;
 use crate::codegen::model::CodeGenModel;
@@ -93,6 +95,8 @@ pub struct CodeGenGenerator {
     tokenizer: Option<crate::tokenizer::CodeGenTokenizer>,
     /// Prompt template to apply
     template: PromptTemplate,
+    /// Fixed RNG seed for reproducible sampling. `None` seeds from entropy.
+    seed: Option<u64>,
 }
 
 impl CodeGenGenerator {
@@ -113,6 +117,7 @@ impl CodeGenGenerator {
             max_new_tokens,
             tokenizer: None,
             template: PromptTemplate::Completion,
+            seed: None,
         }
     }
 
@@ -143,6 +148,10 @@ impl CodeGenGenerator {
     pub fn set_repetition_penalty(&mut self, p: f64) {
         self.repetition_penalty = p;
     }
+    /// Fix the sampling seed so a run is reproducible. `None` seeds from entropy.
+    pub fn set_seed(&mut self, seed: Option<u64>) {
+        self.seed = seed;
+    }
 
     pub fn temperature(&self) -> f64 {
         self.temperature
@@ -153,6 +162,7 @@ impl CodeGenGenerator {
 
     // ── Standard generate (collects all tokens) ──
 
+    /// Returns the **generated** tokens only — the prompt is not included.
     pub fn generate(&self, prompt_token_ids: &[u32]) -> Result<Vec<u32>> {
         let mut collector = CollectStream::new();
         self.generate_stream(prompt_token_ids, &mut collector)?;
@@ -163,20 +173,29 @@ impl CodeGenGenerator {
 
     /// Generate tokens, calling `handler.on_token()` for each new token.
     /// The handler can return `false` to stop generation early.
+    ///
+    /// The handler only sees generated tokens; the prompt is never replayed.
     pub fn generate_stream(
         &self,
         prompt_token_ids: &[u32],
         handler: &mut dyn StreamHandler,
     ) -> Result<()> {
-        let gen_start = std::time::Instant::now();
+        // One RNG for the whole generation. Re-seeding per token would draw the
+        // same value at every step.
+        let mut rng = match self.seed {
+            Some(seed) => StdRng::seed_from_u64(seed),
+            None => StdRng::from_entropy(),
+        };
 
         let mut cache: Option<Vec<KVCache>> = None;
         let positions: Vec<usize> = (0..prompt_token_ids.len()).collect();
-        let logits = self
+        // Only the final position drives the next token, so project just that row
+        // instead of running lm_head over the whole prompt.
+        let hidden = self
             .model
-            .forward_with_cache(prompt_token_ids, &positions, &mut cache)?;
-
-        let last_logits = logits.get(0)?.get(prompt_token_ids.len() - 1)?;
+            .forward_hidden(prompt_token_ids, &positions, &mut cache)?;
+        let last_hidden = hidden.narrow(1, prompt_token_ids.len() - 1, 1)?;
+        let last_logits = self.model.project_logits(&last_hidden)?.get(0)?.get(0)?;
         let first_token = sample(
             &last_logits,
             self.temperature,
@@ -184,7 +203,7 @@ impl CodeGenGenerator {
             self.top_p,
             self.repetition_penalty,
             prompt_token_ids,
-            42,
+            &mut rng,
         )?;
 
         let mut generated = prompt_token_ids.to_vec();
@@ -196,18 +215,12 @@ impl CodeGenGenerator {
             return Ok(());
         }
 
-        eprintln!(
-            "  [prefill done in {:.1}s]",
-            gen_start.elapsed().as_secs_f64()
-        );
-
-        for step in 1..self.max_new_tokens {
-            let step_start = std::time::Instant::now();
+        for _step in 1..self.max_new_tokens {
             let input_id = [generated.last().copied().unwrap()];
             let pos = vec![generated.len() - 1];
 
-            let logits = self.model.forward_with_cache(&input_id, &pos, &mut cache)?;
-            let token_logits = logits.get(0)?.get(0)?;
+            let hidden = self.model.forward_hidden(&input_id, &pos, &mut cache)?;
+            let token_logits = self.model.project_logits(&hidden)?.get(0)?.get(0)?;
 
             let token_id = sample(
                 &token_logits,
@@ -216,7 +229,7 @@ impl CodeGenGenerator {
                 self.top_p,
                 self.repetition_penalty,
                 &generated,
-                42,
+                &mut rng,
             )?;
 
             if token_id == EOS_TOKEN_ID {
@@ -230,12 +243,6 @@ impl CodeGenGenerator {
             if !handler.on_token(token_id, &text) {
                 break; // handler requested early stop
             }
-
-            eprintln!(
-                "  [token {step}/{len} in {:.1}s]",
-                step_start.elapsed().as_secs_f64(),
-                len = self.max_new_tokens
-            );
         }
 
         Ok(())

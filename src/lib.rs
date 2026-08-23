@@ -3,7 +3,8 @@
 //! This crate provides:
 //! - GLM (General Language Model) architecture for infilling
 //! - CodeGen-350M architecture for code generation
-//! - INT8 dynamic quantization support
+//! - FP16 inference
+//! - CLI subcommand implementations
 //! - HTTP server for model serving (feature-gated)
 //! - Training pipeline with YAML config
 //!
@@ -13,6 +14,7 @@
 
 pub mod cli;
 pub mod codegen;
+pub mod commands;
 pub mod generation;
 pub mod glm;
 pub mod layers;

@@ -1,5 +1,5 @@
 # GLM Training Configuration
-# Run with: cargo run --release -- --glm-train --config configs/train.yaml
+# Run with: cargo run --release -- glm-train --config configs/train.yaml
 
 # Model configuration (matches GLMConfig)
 model:
@@ -38,8 +38,6 @@ training:
     max_steps: 10000
     min_lr_ratio: 0.1
 
-  # BATCH  # minimum LR as ratio of base LR
-
   # Batch/accumulation
   micro_batch_size: 1    # sequences per forward pass (keep 1 for CPU)
   gradient_accumulation_steps: 32  # simulate batch=32
@@ -50,6 +48,7 @@ training:
   eval_every: 500
   save_every: 1000
   log_every: 10
+  eval_steps: 100
 
   # Checkpointing
   checkpoint_dir: "glm_checkpoint"
@@ -58,11 +57,7 @@ training:
 
   # Precision
   dtype: "f32"  # "f32" or "f16"
-
-# Evaluation
-evaluation:
-  eval_steps: 100
-  blank_infill_samples: 10
+  tokenizer_path: "codegen_weights/tokenizer.json"
 
 # Logging
 logging:

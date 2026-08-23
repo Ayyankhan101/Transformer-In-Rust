@@ -9,12 +9,12 @@
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](https://www.rust-lang.org/)
 [![Candle](https://img.shields.io/badge/Candle-0.8-blue)](https://github.com/huggingface/candle)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-69%2F69%20✓-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-102%2F102%20✓-brightgreen)]()
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?logo=githubactions)](.github/workflows/ci.yml)
 
 <br>
 
-*No GPU required. No Python runtime. Pure Rust tensor ops — 350M params on an i5-6600.*
+*No GPU required. No Python runtime. Pure Rust tensor ops — 350M params, 20 ms/token on a laptop CPU.*
 
 </div>
 
@@ -49,7 +49,6 @@ graph LR
         C1[RoPE Rotary Embedding]
         C2[KV Cache]
         C3[Parallel Attn + FFN]
-        C4[INT8 Quantization]
     end
 
     E --> TB
@@ -155,15 +154,43 @@ graph TD
 
 ## ⚡ Performance
 
-*Benchmarked on i5-6600 (4C/4T, 7.5GB RAM) — release mode*
+`cargo bench` drives the library directly. The benchmark model is a stand-in for
+CodeGen-350M — `hidden_dim` 512, 12 layers, 8 heads, vocab 16384 — but keeps the real
+`max_seq_len` of 2048, because KV-cache cost scales with the cache buffer rather than with
+parameter count.
 
-| Operation | Time |
+*Apple M1 Pro, release mode:*
+
+| Benchmark | Time |
 |:----------|:-----|
-| Weight loading (350M) | ~0.5s |
-| Prefill (7 tokens) | ~0.3s |
-| Autoregressive step | ~0.1s/token |
-| 37-token generation | ~3.2s |
-| GLM training step | ~0.02s |
+| `prefill/32_tokens` | 35.8 ms |
+| `prefill/32_tokens_hidden_only` (no vocabulary projection) | 29.8 ms |
+| `generator/32_prompt_16_new` (prefill + decode + sampling) | 110.9 ms |
+| Decode, per token | ~5.6 ms |
+| `weight_load/tiny_h4` | 1.38 ms |
+| `prefill_dtype/f32` vs `prefill_dtype/f16` | 41.8 ms vs 29.4 ms |
+
+Reproduce with `cargo bench --bench transformer`, or refresh this table with
+`bash scripts/update-readme-benchmarks.sh`.
+
+### CodeGen-350M, real weights
+
+`Salesforce/codegen-350M-multi`, 64 tokens from `def quicksort(arr):`, greedy,
+Apple M1 Pro:
+
+| | F32 | F16 |
+|:--|--:|--:|
+| Generation, 64 tokens | 4.4 s | **1.3 s** |
+| Per token | 68.8 ms | **20.3 ms** |
+| Wall clock including weight load | 5.0 s | 1.7 s |
+| Peak resident memory | 1.63 GB | 1.08 GB |
+
+Reproduce with:
+
+```bash
+cargo run --release -- download
+cargo run --release -- --f16 complete "def quicksort(arr):" --max-tokens 64 --temperature 0.0 --no-stream
+```
 
 > ⚠️ Debug builds are ~20× slower. Always use `--release`.
 
@@ -210,7 +237,6 @@ graph TD
         CM["model.rs"]
         CR["rotary.rs<br/>RoPE"]
         CW["weights.rs<br/>PyTorch Loader"]
-        CQ["quantized.rs<br/>INT8 Quantization"]
         CK["kv_cache.rs"]
     end
 
@@ -299,13 +325,14 @@ cargo run --release -- glm-train --data-path data --steps 500
 |:-----|:------------|
 | `--f16` | Use FP16 precision (faster, less memory) |
 | `--weights-dir DIR` | Path to weights directory (default: `codegen_weights`) |
+| `--seed N` | Fixed sampling seed for reproducible output |
 
 ### Subcommand Reference
 
 | Command | Description | Options |
 |:--------|:------------|:--------|
 | `chat` | Multi-turn conversational code generation | `--system <prompt>` |
-| `complete <prompt>` | Single-shot code generation | `--max-tokens`, `--temperature`, `--template`, `--stream` |
+| `complete <prompt>` | Single-shot code generation | `--max-tokens`, `--temperature`, `--template`, `--no-stream` |
 | `repl` | Interactive REPL (single-turn) | — |
 | `info` | Print model info and weight status | — |
 | `download` | Download CodeGen-350M weights from HuggingFace | — |
@@ -349,19 +376,13 @@ curl -X POST http://localhost:8080/generate \
 
 ---
 
-## ⚖️ Quantization
-
-### INT8 Dynamic Quantization
-
-Per-channel INT8 quantization reduces model size by ~4x with minimal quality loss:
-
-- **Method**: Per-channel symmetric quantization with offset (u8 + 128)
-- **Compression**: ~4x for large linear layers
-- **Ranking**: Preserves relative token rankings
+## ⚖️ Precision
 
 ### FP16 Inference
 
-Full dtype propagation through all layers — 23% speedup on CPU:
+Full dtype propagation through all layers, including blank-initialised models.
+On real CodeGen-350M weights it is **3.4× faster** than F32 (20.3 ms/token against
+68.8 ms) and uses a third less memory:
 
 ```bash
 cargo run --release -- --f16 chat
@@ -377,24 +398,26 @@ The GLM model supports training from scratch with a production-grade pipeline:
 ### Configuration
 
 ```yaml
-# configs/train.yaml
+# configs/train.yaml — every field is optional and falls back to its default
 model:
+  vocab_size: 51200
   hidden_dim: 256
   num_layers: 6
   num_heads: 8
   ffn_dim: 1024
-  max_seq_len: 128
-  vocab_size: 16384
+  max_seq_len: 512
 
 training:
-  batch_size: 8
-  learning_rate: 0.0003
-  num_steps: 1000
+  learning_rate: 1e-4
+  max_grad_norm: 1.0
+  micro_batch_size: 1              # sequences per forward pass
+  gradient_accumulation_steps: 32  # forward passes per optimizer step
+  max_steps: 10000
 ```
 
 ### Features
 
-- **YAML config** — Declarative training configuration
+- **YAML config** — Declarative training configuration via `--config`
 - **DataLoader** — Train/eval split, shuffling, random windowing
 - **LR Scheduler** — Cosine decay with linear warmup
 - **Safetensors Checkpoints** — Save/load model + optimizer state
@@ -405,7 +428,11 @@ training:
 ### Quick Start
 
 ```bash
+# defaults
 cargo run --release -- glm-train --data-path data --steps 500
+
+# or drive it from a YAML config
+cargo run --release -- glm-train --config configs/train.yaml --steps 500
 ```
 
 ---
@@ -446,8 +473,7 @@ cargo run --release -- glm-train --data-path data --steps 500
 - **Blank-Infilling** — Bidirectional context with causal within-blank masking
 - **Sampling Pipeline** — Repetition penalty → temperature → top-k → top-p → random sample
 - **Zero-Init Loading** — Avoids allocating 350M random floats before overwriting with weights
-- **FP16 Inference** — Full dtype propagation for 23% speedup
-- **INT8 Quantization** — Per-channel symmetric quantization, ~4x compression
+- **FP16 Inference** — Full dtype propagation through every layer
 - **Token Streaming** — Stream tokens as they're generated
 - **Prompt Templates** — Completion, instruct, and chat templates
 - **Multi-Turn Chat** — Conversational code generation with history
@@ -499,7 +525,6 @@ cargo test
 | CodeGen Config | Defaults, head_dim, HF config parsing |
 | CodeGen KV Cache | New, append, reset, dtype support |
 | CodeGen Model | Blank-forward, RoPE no-segfault |
-| Quantized | INT8 quantized linear roundtrip, ranking preservation |
 | Sampling | Argmax, temperature-zero |
 | Training Config | Defaults, YAML serialization, GLM config conversion |
 | Training Data | DataLoader, batch, truncation, split, reset |

@@ -1,561 +1,171 @@
-use candle_core::{DType, Device, Tensor};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+//! Benchmarks for the CodeGen inference path.
+//!
+//! These call the library directly. An earlier version of this file re-implemented
+//! the model inline, which meant it measured a copy of the code rather than the
+//! code — including a QKV split that had a bug the real model no longer has.
 
-fn bench_rope_2d(c: &mut Criterion) {
-    let device = Device::Cpu;
-    let mut group = c.benchmark_group("rope_2d");
+use std::path::Path;
 
-    for &hidden_dim in &[256, 512, 1024] {
-        let max_positions = 512;
-        let pos_1 = Tensor::randn(0.0f32, 0.02f32, (max_positions, hidden_dim), &device).unwrap();
-        let pos_2 = Tensor::randn(0.0f32, 0.02f32, (max_positions, hidden_dim), &device).unwrap();
+use candle_core::{DType, Device};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 
-        for &seq_len in &[32, 64, 128] {
-            let pos_1_ids: Vec<u32> = (0..seq_len as u32).map(|i| i % 4).collect();
-            let pos_2_ids: Vec<u32> = (0..seq_len as u32).collect();
+use rust_transformer::codegen::config::CodeGenConfig;
+use rust_transformer::codegen::kv_cache::KVCache;
+use rust_transformer::codegen::model::CodeGenModel;
+use rust_transformer::codegen::weights::WeightLoader;
+use rust_transformer::generation::codegen_generate::CodeGenGenerator;
 
-            group.throughput(Throughput::Elements((seq_len * hidden_dim) as u64));
-            group.bench_with_input(
-                BenchmarkId::new("f32", format!("h{}_s{}", hidden_dim, seq_len)),
-                &(&pos_1, &pos_2, &pos_1_ids, &pos_2_ids, hidden_dim, seq_len),
-                |b, (pos_1, pos_2, pos_1_ids, pos_2_ids, hidden_dim, seq_len)| {
-                    b.iter(|| {
-                        let p1_tensor = Tensor::from_slice(pos_1_ids, *seq_len, &device).unwrap();
-                        let p2_tensor = Tensor::from_slice(pos_2_ids, *seq_len, &device).unwrap();
-                        let e1 = pos_1.index_select(&p1_tensor, 0).unwrap();
-                        let e2 = pos_2.index_select(&p2_tensor, 0).unwrap();
-                        e1.broadcast_add(&e2).unwrap().unsqueeze(0).unwrap()
-                    });
-                },
-            );
-        }
+/// A stand-in for CodeGen-350M: small enough to build quickly, but with the real
+/// `max_seq_len`. KV-cache cost scales with the cache buffer, not with parameter
+/// count, so shrinking `max_seq_len` would hide exactly what these measure.
+fn bench_config() -> CodeGenConfig {
+    CodeGenConfig {
+        vocab_size: 16384,
+        hidden_dim: 512,
+        num_layers: 12,
+        num_heads: 8,
+        ffn_dim: 2048,
+        max_seq_len: 2048,
+        rotary_dim: 32,
+        ..Default::default()
     }
+}
+
+const PROMPT_LEN: usize = 32;
+const NEW_TOKENS: usize = 16;
+
+fn prompt_tokens(config: &CodeGenConfig) -> Vec<u32> {
+    (0..PROMPT_LEN)
+        .map(|i| (i * 7 % config.vocab_size) as u32)
+        .collect()
+}
+
+/// Prefill: one forward pass over the whole prompt, empty cache.
+fn bench_prefill(c: &mut Criterion) {
+    let device = Device::Cpu;
+    let config = bench_config();
+    let model = CodeGenModel::new_blank(config.clone(), &device).unwrap();
+    let tokens = prompt_tokens(&config);
+    let positions: Vec<usize> = (0..tokens.len()).collect();
+
+    let mut group = c.benchmark_group("prefill");
+    group.throughput(Throughput::Elements(PROMPT_LEN as u64));
+    group.bench_function("32_tokens", |b| {
+        b.iter(|| {
+            let mut cache: Option<Vec<KVCache>> = None;
+            model
+                .forward_with_cache(&tokens, &positions, &mut cache)
+                .unwrap()
+        });
+    });
+    // Same work minus the vocabulary projection. The gap is what generation
+    // saves by projecting only the last position.
+    group.bench_function("32_tokens_hidden_only", |b| {
+        b.iter(|| {
+            let mut cache: Option<Vec<KVCache>> = None;
+            model
+                .forward_hidden(&tokens, &positions, &mut cache)
+                .unwrap()
+        });
+    });
     group.finish();
 }
 
-fn bench_kv_cache(c: &mut Criterion) {
+/// The path `codegen complete` actually takes: prefill, decode, sampling.
+fn bench_generator(c: &mut Criterion) {
     let device = Device::Cpu;
-    let mut group = c.benchmark_group("kv_cache");
+    let config = bench_config();
+    let model = CodeGenModel::new_blank(config.clone(), &device).unwrap();
+    let tokens = prompt_tokens(&config);
+    let generator = CodeGenGenerator::new(model, 0.8, 40, 0.9, 1.2, NEW_TOKENS);
 
-    for &(n_heads, head_dim) in &[(8, 64), (16, 64), (8, 128)] {
-        let max_seq = 512;
+    let mut group = c.benchmark_group("generator");
+    group.throughput(Throughput::Elements(NEW_TOKENS as u64));
+    group.bench_function("32_prompt_16_new", |b| {
+        b.iter(|| generator.generate(&tokens).unwrap());
+    });
+    group.finish();
+}
 
-        group.bench_function(
-            BenchmarkId::new("append_1", format!("nh{}_hd{}", n_heads, head_dim)),
-            |b| {
-                let mut cache = candle_core::Tensor::zeros(
-                    (1, n_heads, max_seq, head_dim),
-                    DType::F32,
-                    &device,
-                )
+/// Prefill plus autoregressive decode — the number that matters for `complete`.
+/// Subtract the `prefill` result to isolate per-token decode cost.
+fn bench_generate(c: &mut Criterion) {
+    let device = Device::Cpu;
+    let config = bench_config();
+    let model = CodeGenModel::new_blank(config.clone(), &device).unwrap();
+    let tokens = prompt_tokens(&config);
+    let positions: Vec<usize> = (0..tokens.len()).collect();
+
+    let mut group = c.benchmark_group("generate");
+    group.throughput(Throughput::Elements(NEW_TOKENS as u64));
+    group.bench_function("32_prompt_16_new", |b| {
+        b.iter(|| {
+            let mut cache: Option<Vec<KVCache>> = None;
+            model
+                .forward_with_cache(&tokens, &positions, &mut cache)
                 .unwrap();
-                let mut pos = 0usize;
-                let k_new =
-                    Tensor::randn(0.0f32, 1.0f32, (1, n_heads, 1, head_dim), &device).unwrap();
-                let v_new =
-                    Tensor::randn(0.0f32, 1.0f32, (1, n_heads, 1, head_dim), &device).unwrap();
-
-                b.iter(|| {
-                    let end = pos + 1;
-                    cache = cache
-                        .slice_assign(&[0..1, 0..n_heads, pos..end, 0..head_dim], &k_new)
-                        .unwrap();
-                    pos = end;
-                    pos
-                });
-            },
-        );
-
-        group.bench_function(
-            BenchmarkId::new("append_8", format!("nh{}_hd{}", n_heads, head_dim)),
-            |b| {
-                let mut cache = candle_core::Tensor::zeros(
-                    (1, n_heads, max_seq, head_dim),
-                    DType::F32,
-                    &device,
-                )
-                .unwrap();
-                let mut pos = 0usize;
-                let k_new =
-                    Tensor::randn(0.0f32, 1.0f32, (1, n_heads, 8, head_dim), &device).unwrap();
-                let v_new =
-                    Tensor::randn(0.0f32, 1.0f32, (1, n_heads, 8, head_dim), &device).unwrap();
-
-                b.iter(|| {
-                    let end = pos + 8;
-                    cache = cache
-                        .slice_assign(&[0..1, 0..n_heads, pos..end, 0..head_dim], &k_new)
-                        .unwrap();
-                    pos = end;
-                    pos
-                });
-            },
-        );
-    }
-    group.finish();
-}
-
-fn bench_quantized_matmul(c: &mut Criterion) {
-    let device = Device::Cpu;
-    let mut group = c.benchmark_group("quantized_matmul");
-
-    for &hidden_dim in &[256, 512, 1024] {
-        let weight = Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim), &device).unwrap();
-
-        group.throughput(Throughput::Elements(hidden_dim as u64));
-        group.bench_with_input(
-            BenchmarkId::new("f32", format!("h{}", hidden_dim)),
-            &(&weight, hidden_dim),
-            |b, (weight, hidden_dim)| {
-                b.iter(|| {
-                    let x = Tensor::randn(0.0f32, 1.0f32, (1, 1, *hidden_dim), &device).unwrap();
-                    x.broadcast_matmul(&weight.unsqueeze(0).unwrap()).unwrap()
-                });
-            },
-        );
-
-        // Simulate INT8 quantized matmul: round weights to simulate int8 precision loss
-        let weight_q = weight.round().unwrap();
-        group.throughput(Throughput::Elements(hidden_dim as u64));
-        group.bench_with_input(
-            BenchmarkId::new("i8_simulated", format!("h{}", hidden_dim)),
-            &(&weight_q, hidden_dim),
-            |b, (weight_q, hidden_dim)| {
-                b.iter(|| {
-                    let x = Tensor::randn(0.0f32, 1.0f32, (1, 1, *hidden_dim), &device).unwrap();
-                    let x_q = x.round().unwrap();
-                    x_q.broadcast_matmul(&weight_q.unsqueeze(0).unwrap())
-                        .unwrap()
-                });
-            },
-        );
-    }
-    group.finish();
-}
-
-pub fn bench_attention(c: &mut Criterion) {
-    let device = Device::Cpu;
-    let mut group = c.benchmark_group("attention");
-
-    for &hidden_dim in &[256, 512, 1024] {
-        for &num_heads in &[4, 8, 16] {
-            if hidden_dim % num_heads != 0 {
-                continue;
+            for step in 0..NEW_TOKENS {
+                let pos = tokens.len() + step;
+                model
+                    .forward_with_cache(&[1u32], &[pos], &mut cache)
+                    .unwrap();
             }
-            let head_dim = hidden_dim / num_heads;
-            let seq_len = 64;
-
-            let qkv_weight =
-                Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim * 3), &device).unwrap();
-            let out_weight =
-                Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim), &device).unwrap();
-
-            group.throughput(Throughput::Elements(
-                (seq_len * hidden_dim * num_heads) as u64,
-            ));
-            group.bench_with_input(
-                BenchmarkId::new("f32", format!("h{}_nh{}", hidden_dim, num_heads)),
-                &(
-                    &qkv_weight,
-                    &out_weight,
-                    hidden_dim,
-                    num_heads,
-                    head_dim,
-                    seq_len,
-                ),
-                |b, (qkv_weight, out_weight, hidden_dim, num_heads, head_dim, seq_len)| {
-                    b.iter(|| {
-                        let x = Tensor::randn(0.0f32, 1.0f32, (1, *seq_len, *hidden_dim), &device)
-                            .unwrap();
-                        let qkv = x
-                            .broadcast_matmul(&qkv_weight.unsqueeze(0).unwrap())
-                            .unwrap();
-                        let qkv = qkv
-                            .reshape((1, *seq_len, 3, *num_heads, *head_dim))
-                            .unwrap();
-                        let qkv = qkv.permute((0, 3, 2, 1, 4)).unwrap();
-                        let q = qkv.get_on_dim(2, 0).unwrap();
-                        let v = qkv.get_on_dim(2, 1).unwrap();
-                        let k = qkv.get_on_dim(2, 2).unwrap();
-
-                        let scale = 1.0 / (*head_dim as f64).sqrt();
-                        let scores = q.broadcast_matmul(&k.transpose(2, 3).unwrap()).unwrap();
-                        let scores = (scores * scale).unwrap();
-
-                        let weights = candle_nn::ops::softmax(&scores, 3).unwrap();
-                        let context = weights.broadcast_matmul(&v).unwrap();
-                        let context = context
-                            .permute((0, 2, 1, 3))
-                            .unwrap()
-                            .reshape((1, *seq_len, *hidden_dim))
-                            .unwrap();
-                        context.broadcast_matmul(&out_weight.unsqueeze(0).unwrap())
-                    });
-                },
-            );
-        }
-    }
+        });
+    });
     group.finish();
 }
 
-pub fn bench_ffn(c: &mut Criterion) {
+/// Weight loading, on the committed parity fixture.
+fn bench_weight_load(c: &mut Criterion) {
     let device = Device::Cpu;
-    let mut group = c.benchmark_group("ffn");
-
-    for &hidden_dim in &[256, 512, 1024] {
-        for &ffn_dim in &[1024, 2048, 4096] {
-            let seq_len = 64;
-
-            let fc_in = Tensor::randn(0.0f32, 0.02f32, (hidden_dim, ffn_dim), &device).unwrap();
-            let fc_out = Tensor::randn(0.0f32, 0.02f32, (ffn_dim, hidden_dim), &device).unwrap();
-
-            group.throughput(Throughput::Elements((seq_len * hidden_dim) as u64));
-            group.bench_with_input(
-                BenchmarkId::new("gelu", format!("h{}_ffn{}", hidden_dim, ffn_dim)),
-                &(&fc_in, &fc_out, hidden_dim, ffn_dim, seq_len),
-                |b, (fc_in, fc_out, hidden_dim, _ffn_dim, seq_len)| {
-                    b.iter(|| {
-                        let x = Tensor::randn(0.0f32, 1.0f32, (1, *seq_len, *hidden_dim), &device)
-                            .unwrap();
-                        let hidden = x.broadcast_matmul(&fc_in.unsqueeze(0).unwrap()).unwrap();
-                        let activated = hidden.gelu().unwrap();
-                        activated.broadcast_matmul(&fc_out.unsqueeze(0).unwrap())
-                    });
-                },
-            );
-        }
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let path = dir.join("tiny_h4.pth");
+    if !path.exists() {
+        eprintln!("skipping weight_load bench: {} not found", path.display());
+        return;
     }
-    group.finish();
-}
-
-pub fn bench_layernorm(c: &mut Criterion) {
-    let device = Device::Cpu;
-    let mut group = c.benchmark_group("layernorm");
-
-    for &hidden_dim in &[256, 512, 1024] {
-        let seq_len = 64;
-        let weight = Tensor::ones(hidden_dim, DType::F32, &device).unwrap();
-        let bias = Tensor::zeros(hidden_dim, DType::F32, &device).unwrap();
-        let eps = 1e-5;
-
-        group.throughput(Throughput::Elements((seq_len * hidden_dim) as u64));
-        group.bench_with_input(
-            BenchmarkId::new("f32", format!("h{}", hidden_dim)),
-            &(&weight, &bias, hidden_dim, seq_len, eps),
-            |b, (weight, bias, hidden_dim, seq_len, eps)| {
-                b.iter(|| {
-                    let x =
-                        Tensor::randn(0.0f32, 1.0f32, (1, *seq_len, *hidden_dim), &device).unwrap();
-                    let last_dim = x.dims().len() - 1;
-                    let mean = x.mean(last_dim).unwrap();
-                    let mean = mean.unsqueeze(last_dim).unwrap();
-                    let x_centered = x.broadcast_sub(&mean).unwrap();
-                    let variance = x_centered.sqr().unwrap().mean(last_dim).unwrap();
-                    let std = (variance + *eps).unwrap().sqrt().unwrap();
-                    let std = std.unsqueeze(last_dim).unwrap();
-                    let normalized = x_centered.broadcast_div(&std).unwrap();
-                    let weight = if weight.dtype() != normalized.dtype() {
-                        weight.to_dtype(normalized.dtype()).unwrap()
-                    } else {
-                        (*weight).clone()
-                    };
-                    let bias = if bias.dtype() != normalized.dtype() {
-                        bias.to_dtype(normalized.dtype()).unwrap()
-                    } else {
-                        (*bias).clone()
-                    };
-                    normalized
-                        .broadcast_mul(&weight)
-                        .unwrap()
-                        .broadcast_add(&bias)
-                        .unwrap()
-                });
-            },
-        );
-    }
-    group.finish();
-}
-
-pub fn bench_full_block(c: &mut Criterion) {
-    let device = Device::Cpu;
-    let mut group = c.benchmark_group("full_block");
-
-    for &hidden_dim in &[256, 512, 1024] {
-        for &num_layers in &[1, 6, 12] {
-            let seq_len = 64;
-            let num_heads = 8;
-            let head_dim = hidden_dim / num_heads;
-            let ffn_dim = hidden_dim * 4;
-
-            let mut layers = Vec::new();
-            for _ in 0..num_layers {
-                let qkv_weight =
-                    Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim * 3), &device).unwrap();
-                let out_weight =
-                    Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim), &device).unwrap();
-                let ln1_w = Tensor::ones(hidden_dim, DType::F32, &device).unwrap();
-                let ln1_b = Tensor::zeros(hidden_dim, DType::F32, &device).unwrap();
-                let ln2_w = Tensor::ones(hidden_dim, DType::F32, &device).unwrap();
-                let ln2_b = Tensor::zeros(hidden_dim, DType::F32, &device).unwrap();
-                let fc_in = Tensor::randn(0.0f32, 0.02f32, (hidden_dim, ffn_dim), &device).unwrap();
-                let fc_out =
-                    Tensor::randn(0.0f32, 0.02f32, (ffn_dim, hidden_dim), &device).unwrap();
-                layers.push((
-                    qkv_weight, out_weight, ln1_w, ln1_b, ln2_w, ln2_b, fc_in, fc_out,
-                ));
-            }
-
-            group.throughput(Throughput::Elements((seq_len * hidden_dim) as u64));
-            group.bench_with_input(
-                BenchmarkId::new("f32", format!("h{}_l{}", hidden_dim, num_layers)),
-                &(&layers, hidden_dim, num_layers, num_heads, head_dim, ffn_dim, seq_len),
-                |b, (layers, hidden_dim, num_layers, num_heads, head_dim, _ffn_dim, seq_len)| {
-                    b.iter(|| {
-                        let mut x = Tensor::randn(0.0f32, 1.0f32, (1, *seq_len, *hidden_dim), &device).unwrap();
-                        for layer in layers.iter().take(*num_layers) {
-                            let (qkv_weight, out_weight, ln1_w, ln1_b, ln2_w, ln2_b, fc_in, fc_out) = layer;
-
-                            // LN1
-                            let last_dim = x.dims().len() - 1;
-                            let mean = x.mean(last_dim).unwrap();
-                            let mean = mean.unsqueeze(last_dim).unwrap();
-                            let x_centered = x.broadcast_sub(&mean).unwrap();
-                            let variance = x_centered.sqr().unwrap().mean(last_dim).unwrap();
-                            let std = (variance + 1e-5).unwrap().sqrt().unwrap();
-                            let std = std.unsqueeze(last_dim).unwrap();
-                            let mut normed = x_centered.broadcast_div(&std).unwrap();
-                            let ln1_w = if ln1_w.dtype() != normed.dtype() {
-                                ln1_w.to_dtype(normed.dtype()).unwrap()
-                            } else {
-                                ln1_w.clone()
-                            };
-                            let ln1_b = if ln1_b.dtype() != normed.dtype() {
-                                ln1_b.to_dtype(normed.dtype()).unwrap()
-                            } else {
-                                ln1_b.clone()
-                            };
-                            normed = normed.broadcast_mul(&ln1_w).unwrap().broadcast_add(&ln1_b).unwrap();
-
-                            // Attention
-                            let qkv = normed.broadcast_matmul(&qkv_weight.unsqueeze(0).unwrap()).unwrap();
-                            let qkv = qkv.reshape((1, *seq_len, 3, *num_heads, *head_dim)).unwrap();
-                            let qkv = qkv.permute((0, 3, 2, 1, 4)).unwrap();
-                            let q = qkv.get_on_dim(2, 0).unwrap();
-                            let v = qkv.get_on_dim(2, 1).unwrap();
-                            let k = qkv.get_on_dim(2, 2).unwrap();
-
-                            let scale = 1.0 / (*head_dim as f64).sqrt();
-                            let scores = q.broadcast_matmul(&k.transpose(2, 3).unwrap()).unwrap();
-                            let scores = (scores * scale).unwrap();
-
-                            let weights = candle_nn::ops::softmax(&scores, 3).unwrap();
-                            let context = weights.broadcast_matmul(&v).unwrap();
-                            let context = context.permute((0, 2, 1, 3)).unwrap()
-                                .reshape((1, *seq_len, *hidden_dim)).unwrap();
-                            let attn_out = context.broadcast_matmul(&out_weight.unsqueeze(0).unwrap()).unwrap();
-
-                            // Residual 1
-                            x = x.broadcast_add(&attn_out).unwrap();
-
-                            // LN2
-                            let last_dim = x.dims().len() - 1;
-                            let mean = x.mean(last_dim).unwrap();
-                            let mean = mean.unsqueeze(last_dim).unwrap();
-                            let x_centered = x.broadcast_sub(&mean).unwrap();
-                            let variance = x_centered.sqr().unwrap().mean(last_dim).unwrap();
-                            let std = (variance + 1e-5).unwrap().sqrt().unwrap();
-                            let std = std.unsqueeze(last_dim).unwrap();
-                            let mut normed = x_centered.broadcast_div(&std).unwrap();
-                            let ln2_w = if ln2_w.dtype() != normed.dtype() {
-                                ln2_w.to_dtype(normed.dtype()).unwrap()
-                            } else {
-                                ln2_w.clone()
-                            };
-                            let ln2_b = if ln2_b.dtype() != normed.dtype() {
-                                ln2_b.to_dtype(normed.dtype()).unwrap()
-                            } else {
-                                ln2_b.clone()
-                            };
-                            normed = normed.broadcast_mul(&ln2_w).unwrap().broadcast_add(&ln2_b).unwrap();
-
-                            // FFN
-                            let hidden = normed.broadcast_matmul(&fc_in.unsqueeze(0).unwrap()).unwrap();
-                            let activated = hidden.gelu().unwrap();
-                            let ffn_out = activated.broadcast_matmul(&fc_out.unsqueeze(0).unwrap()).unwrap();
-
-                            // Residual 2
-                            x = x.broadcast_add(&ffn_out).unwrap();
-                        }
-                    });
-                },
-            );
-        }
-    }
-    group.finish();
-}
-
-pub fn bench_e2e_inference(c: &mut Criterion) {
-    let device = Device::Cpu;
-    let mut group = c.benchmark_group("e2e_inference");
-
-    for &hidden_dim in &[256, 512, 1024] {
-        let seq_len = 7; // prefill
-        let num_heads = 8;
-        let head_dim = hidden_dim / num_heads;
-        let ffn_dim = hidden_dim * 4;
-        let num_layers = 6;
-
-        let mut layers = Vec::new();
-        for _ in 0..num_layers {
-            let qkv_weight =
-                Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim * 3), &device).unwrap();
-            let out_weight =
-                Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim), &device).unwrap();
-            let ln1_w = Tensor::ones(hidden_dim, DType::F32, &device).unwrap();
-            let ln1_b = Tensor::zeros(hidden_dim, DType::F32, &device).unwrap();
-            let ln2_w = Tensor::ones(hidden_dim, DType::F32, &device).unwrap();
-            let ln2_b = Tensor::zeros(hidden_dim, DType::F32, &device).unwrap();
-            let fc_in = Tensor::randn(0.0f32, 0.02f32, (hidden_dim, ffn_dim), &device).unwrap();
-            let fc_out = Tensor::randn(0.0f32, 0.02f32, (ffn_dim, hidden_dim), &device).unwrap();
-            layers.push((
-                qkv_weight, out_weight, ln1_w, ln1_b, ln2_w, ln2_b, fc_in, fc_out,
-            ));
-        }
-
-        group.throughput(Throughput::Elements(1));
-        group.bench_with_input(
-            BenchmarkId::new("prefill", format!("h{}", hidden_dim)),
-            &(&layers, hidden_dim, num_layers, num_heads, head_dim, ffn_dim, seq_len),
-            |b, (layers, hidden_dim, num_layers, num_heads, head_dim, _ffn_dim, seq_len)| {
-                b.iter(|| {
-                    let mut x = Tensor::randn(0.0f32, 1.0f32, (1, *seq_len, *hidden_dim), &device).unwrap();
-                    for layer in layers.iter().take(*num_layers) {
-                        let (qkv_weight, out_weight, ln1_w, ln1_b, _ln2_w, _ln2_b, _fc_in, _fc_out) = layer;
-
-                        let last_dim = x.dims().len() - 1;
-                        let mean = x.mean(last_dim).unwrap();
-                        let mean = mean.unsqueeze(last_dim).unwrap();
-                        let x_centered = x.broadcast_sub(&mean).unwrap();
-                        let variance = x_centered.sqr().unwrap().mean(last_dim).unwrap();
-                        let std = (variance + 1e-5).unwrap().sqrt().unwrap();
-                        let std = std.unsqueeze(last_dim).unwrap();
-                        let mut normed = x_centered.broadcast_div(&std).unwrap();
-                        let ln1_w = if ln1_w.dtype() != normed.dtype() {
-                            ln1_w.to_dtype(normed.dtype()).unwrap()
-                        } else {
-                            ln1_w.clone()
-                        };
-                        let ln1_b = if ln1_b.dtype() != normed.dtype() {
-                            ln1_b.to_dtype(normed.dtype()).unwrap()
-                        } else {
-                            ln1_b.clone()
-                        };
-                        normed = normed.broadcast_mul(&ln1_w).unwrap().broadcast_add(&ln1_b).unwrap();
-
-                        let qkv = normed.broadcast_matmul(&qkv_weight.unsqueeze(0).unwrap()).unwrap();
-                        let qkv = qkv.reshape((1, *seq_len, 3, *num_heads, *head_dim)).unwrap();
-                        let qkv = qkv.permute((0, 3, 2, 1, 4)).unwrap();
-                        let q = qkv.get_on_dim(2, 0).unwrap();
-                        let v = qkv.get_on_dim(2, 1).unwrap();
-                        let k = qkv.get_on_dim(2, 2).unwrap();
-
-                        let scale = 1.0 / (*head_dim as f64).sqrt();
-                        let scores = q.broadcast_matmul(&k.transpose(2, 3).unwrap()).unwrap();
-                        let scores = (scores * scale).unwrap();
-
-                        let weights = candle_nn::ops::softmax(&scores, 3).unwrap();
-                        let context = weights.broadcast_matmul(&v).unwrap();
-                        let context = context.permute((0, 2, 1, 3)).unwrap()
-                            .reshape((1, *seq_len, *hidden_dim)).unwrap();
-                        let attn_out = context.broadcast_matmul(&out_weight.unsqueeze(0).unwrap()).unwrap();
-
-                        x = x.broadcast_add(&attn_out).unwrap();
-                    }
-                });
-            },
-        );
-    }
-    group.finish();
-}
-
-pub fn bench_f16_vs_f32(c: &mut Criterion) {
-    let device = Device::Cpu;
-    let mut group = c.benchmark_group("f16_vs_f32");
-
-    for &dtype in &[DType::F32, DType::F16] {
-        let hidden_dim = 1024;
-        let num_heads = 16;
-        let head_dim = hidden_dim / num_heads;
-        let seq_len = 64;
-
-        let qkv_weight = Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim * 3), &device)
-            .unwrap()
-            .to_dtype(dtype)
+    let config_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("tiny_h4_config.json")).unwrap())
             .unwrap();
-        let out_weight = Tensor::randn(0.0f32, 0.02f32, (hidden_dim, hidden_dim), &device)
-            .unwrap()
-            .to_dtype(dtype)
-            .unwrap();
+    let config = CodeGenConfig::from_hf_config(&config_json);
 
-        group.throughput(Throughput::Elements(
-            (seq_len * hidden_dim * num_heads) as u64,
-        ));
-        group.bench_with_input(
-            BenchmarkId::new("attention", format!("{:?}", dtype)),
-            &(
-                &qkv_weight,
-                &out_weight,
-                hidden_dim,
-                num_heads,
-                head_dim,
-                seq_len,
-            ),
-            |b, (qkv_weight, out_weight, hidden_dim, num_heads, head_dim, seq_len)| {
-                b.iter(|| {
-                    let x = Tensor::randn(0.0f32, 1.0f32, (1, *seq_len, *hidden_dim), &device)
-                        .unwrap()
-                        .to_dtype(dtype)
-                        .unwrap();
-                    let qkv = x
-                        .broadcast_matmul(&qkv_weight.unsqueeze(0).unwrap())
-                        .unwrap();
-                    let qkv = qkv
-                        .reshape((1, *seq_len, 3, *num_heads, *head_dim))
-                        .unwrap();
-                    let qkv = qkv.permute((0, 3, 2, 1, 4)).unwrap();
-                    let q = qkv.get_on_dim(2, 0).unwrap();
-                    let v = qkv.get_on_dim(2, 1).unwrap();
-                    let k = qkv.get_on_dim(2, 2).unwrap();
+    c.bench_function("weight_load/tiny_h4", |b| {
+        b.iter(|| WeightLoader::load_from_pytorch(&path, &config, &device).unwrap());
+    });
+}
 
-                    let scale = 1.0 / (*head_dim as f64).sqrt();
-                    let scores = q.broadcast_matmul(&k.transpose(2, 3).unwrap()).unwrap();
-                    let scores = (scores * scale).unwrap();
+/// F32 against F16 on the same shapes, to keep the README's precision claim honest.
+fn bench_dtype(c: &mut Criterion) {
+    let device = Device::Cpu;
+    let mut group = c.benchmark_group("prefill_dtype");
 
-                    let weights = candle_nn::ops::softmax(&scores, 3).unwrap();
-                    let context = weights.broadcast_matmul(&v).unwrap();
-                    let context = context
-                        .permute((0, 2, 1, 3))
-                        .unwrap()
-                        .reshape((1, *seq_len, *hidden_dim))
-                        .unwrap();
-                    context.broadcast_matmul(&out_weight.unsqueeze(0).unwrap())
-                });
-            },
-        );
+    for (name, dtype) in [("f32", DType::F32), ("f16", DType::F16)] {
+        let config = CodeGenConfig {
+            dtype,
+            ..bench_config()
+        };
+        let model = CodeGenModel::new_blank(config.clone(), &device).unwrap();
+        let tokens = prompt_tokens(&config);
+        let positions: Vec<usize> = (0..tokens.len()).collect();
+
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                let mut cache: Option<Vec<KVCache>> = None;
+                model
+                    .forward_with_cache(&tokens, &positions, &mut cache)
+                    .unwrap()
+            });
+        });
     }
     group.finish();
 }
 
 criterion_group!(
     benches,
-    bench_attention,
-    bench_ffn,
-    bench_layernorm,
-    bench_full_block,
-    bench_e2e_inference,
-    bench_f16_vs_f32,
-    bench_rope_2d,
-    bench_kv_cache,
-    bench_quantized_matmul
+    bench_prefill,
+    bench_generate,
+    bench_generator,
+    bench_weight_load,
+    bench_dtype
 );
 criterion_main!(benches);

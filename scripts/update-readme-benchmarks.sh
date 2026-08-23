@@ -37,10 +37,6 @@ done < /tmp/bench_output.txt
 
 echo "Found ${#results[@]} benchmark results"
 
-# Generate benchmark table rows
-TABLE_ROWS=""
-TABLE_ROWS+="| `$name` | $value $unit |\n"
-
 # Now update README.md
 README="$PROJECT_DIR/README.md"
 
@@ -52,13 +48,13 @@ for key in "${!results[@]}"; do
     # Try to map benchmark names to user-friendly labels
     label=""
     case "$key" in
-        *"attention"*) label="Attention forward" ;;
-        *"ffn"*) label="FFN forward" ;;
-        *"layernorm"*|*"layer_norm"*) label="LayerNorm forward" ;;
-        *"block"*) label="Transformer block" ;;
-        *"e2e"*) label="E2E inference (prefill + N tokens)" ;;
-        *"f16"*|*"fp16"*) label="FP16 inference" ;;
-        *"f32"*|*"fp32"*) label="FP32 inference" ;;
+        *"hidden_only"*) label="Prefill, no vocabulary projection" ;;
+        *"prefill_dtype/f16"*) label="Prefill (FP16)" ;;
+        *"prefill_dtype/f32"*) label="Prefill (FP32)" ;;
+        *"prefill"*) label="Prefill (32 tokens)" ;;
+        *"generator"*) label="Generate (32 prompt + 16 new)" ;;
+        *"generate"*) label="Forward passes (32 prompt + 16 new)" ;;
+        *"weight_load"*) label="Weight loading" ;;
         *) label="$key" ;;
     esac
     BENCH_TABLE+="| $label | ${results[$key]} |\n"

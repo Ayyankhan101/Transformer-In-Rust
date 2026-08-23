@@ -55,16 +55,18 @@ Key details:
 - **Causal mask**: Upper-triangular mask with -inf in the upper triangle
 - **No bias**: Following GPT-2/CodeGen convention (LayerNorm provides bias)
 
+**QKV layout**: CodeGen does *not* store the fused projection as
+`[all q | all v | all k]`. It keeps the sharded layout of the original TPU
+implementation — `mp_num = 4` consecutive groups, each holding `[q | v | k]` for
+its slice of the heads. Splitting it any other way gives every head the wrong
+slice of the projection, which is silent: shapes still line up, output is
+garbage. See `split_qkv` in `src/codegen/model.rs`.
+
 ```rust
-// Simplified forward
-fn forward(&self, x: &Tensor) -> Result<Tensor> {
-    let qkv = x.matmul(&self.qkv_weight)?;
-    let q = qkv.narrow(1, 0, hidden_dim);
-    let k = qkv.narrow(1, hidden_dim, hidden_dim);
-    let v = qkv.narrow(1, 2 * hidden_dim, hidden_dim);
-    // ... split heads, compute attention, concat heads
-    output.matmul(&self.out_weight)
-}
+// [bs, sl, MP_NUM, 3, local_dim] — dim 3 selects q, v, k in that order
+let grouped = qkv.reshape((bs, sl, MP_NUM, 3, local_dim))?;
+let q = grouped.get_on_dim(3, 0)?.reshape((bs, sl, num_heads, head_dim))?;
+// flattening group and per-group-head axes yields head `group * (heads / MP_NUM) + i`
 ```
 
 **Causal mask optimization**: Instead of creating a full `[seq, seq]` mask each
@@ -245,15 +247,14 @@ This reduces the per-token computation from O(seq²) to O(seq).
 Weights are loaded from HuggingFace PyTorch checkpoints:
 
 ```rust
-// Loads from .bin (pickle) or .safetensors
-let pth = PthTensors::new(path)?;
-// Map PyTorch names → model parameters
-model.embedding = load_tensor("transformer.wte.weight");
-model.blocks[i].attn = load_tensor("transformer.h.i.attn.qkv_proj.weight");
+// WeightLoader::load picks the format from the extension
+WeightLoader::load(path, &config, &device)?;      // .safetensors or .bin
 ```
 
-The `WeightLoader` handles name mapping and dtype conversion, with zero-init
-to avoid allocating 350M random floats.
+`WeightLoader` handles name mapping and dtype conversion, with zero-init to avoid
+allocating 350M random floats. A tensor named in the model but absent from the
+checkpoint is an error, not a silently zeroed layer. `ModelContext` prefers
+`model.safetensors` over `pytorch_model.bin` when both are present.
 
 ### 3.5 Sampling Pipeline
 
@@ -334,7 +335,7 @@ Auto-cleanup keeps only the N most recent checkpoints.
 
 All weights and activations can use F16 (half precision):
 - **Memory**: ~50% reduction (700MB → 350MB for CodeGen)
-- **Speed**: ~23% faster on i5-6600 with `gemm` F16 support
+- **Speed**: 3.4x faster than F32 on CodeGen-350M (20.3 ms/token against 68.8 ms, Apple M1 Pro)
 - **Quality**: Negligible degradation for inference
 
 ```rust

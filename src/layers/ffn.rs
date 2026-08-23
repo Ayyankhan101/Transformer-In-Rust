@@ -1,4 +1,4 @@
-use candle_core::{Device, Result, Tensor};
+use candle_core::{DType, Device, Result, Tensor};
 
 #[allow(dead_code)]
 #[allow(clippy::upper_case_acronyms)]
@@ -37,10 +37,15 @@ pub struct SwiGLU {
 }
 
 impl SwiGLU {
-    pub fn new_blank(hidden_dim: usize, ffn_dim: usize, device: &Device) -> Result<Self> {
-        let gate = Tensor::zeros((hidden_dim, ffn_dim), candle_core::DType::F32, device)?;
-        let up = Tensor::zeros((hidden_dim, ffn_dim), candle_core::DType::F32, device)?;
-        let down = Tensor::zeros((ffn_dim, hidden_dim), candle_core::DType::F32, device)?;
+    pub fn new_blank(
+        hidden_dim: usize,
+        ffn_dim: usize,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
+        let gate = Tensor::zeros((hidden_dim, ffn_dim), dtype, device)?;
+        let up = Tensor::zeros((hidden_dim, ffn_dim), dtype, device)?;
+        let down = Tensor::zeros((ffn_dim, hidden_dim), dtype, device)?;
         Ok(Self { gate, up, down })
     }
 
@@ -68,9 +73,14 @@ pub struct GELUFFN {
 }
 
 impl GELUFFN {
-    pub fn new_blank(hidden_dim: usize, ffn_dim: usize, device: &Device) -> Result<Self> {
-        let fc_in = Tensor::zeros((hidden_dim, ffn_dim), candle_core::DType::F32, device)?;
-        let fc_out = Tensor::zeros((ffn_dim, hidden_dim), candle_core::DType::F32, device)?;
+    pub fn new_blank(
+        hidden_dim: usize,
+        ffn_dim: usize,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
+        let fc_in = Tensor::zeros((hidden_dim, ffn_dim), dtype, device)?;
+        let fc_out = Tensor::zeros((ffn_dim, hidden_dim), dtype, device)?;
         Ok(Self { fc_in, fc_out })
     }
 
@@ -101,11 +111,16 @@ pub struct GELUNewFFN {
 }
 
 impl GELUNewFFN {
-    pub fn new_blank(hidden_dim: usize, ffn_dim: usize, device: &Device) -> Result<Self> {
-        let fc_in = Tensor::zeros((hidden_dim, ffn_dim), candle_core::DType::F32, device)?;
-        let fc_in_bias = Tensor::zeros(ffn_dim, candle_core::DType::F32, device)?;
-        let fc_out = Tensor::zeros((ffn_dim, hidden_dim), candle_core::DType::F32, device)?;
-        let fc_out_bias = Tensor::zeros(hidden_dim, candle_core::DType::F32, device)?;
+    pub fn new_blank(
+        hidden_dim: usize,
+        ffn_dim: usize,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
+        let fc_in = Tensor::zeros((hidden_dim, ffn_dim), dtype, device)?;
+        let fc_in_bias = Tensor::zeros(ffn_dim, dtype, device)?;
+        let fc_out = Tensor::zeros((ffn_dim, hidden_dim), dtype, device)?;
+        let fc_out_bias = Tensor::zeros(hidden_dim, dtype, device)?;
         Ok(Self {
             fc_in,
             fc_in_bias,
@@ -166,15 +181,18 @@ impl FeedForward {
         activation: Activation,
         hidden_dim: usize,
         ffn_dim: usize,
+        dtype: DType,
         device: &Device,
     ) -> Result<Self> {
         match activation {
             Activation::SwiGLU => Ok(Self::SwiGLU(SwiGLU::new_blank(
-                hidden_dim, ffn_dim, device,
+                hidden_dim, ffn_dim, dtype, device,
             )?)),
-            Activation::GELU => Ok(Self::GELU(GELUFFN::new_blank(hidden_dim, ffn_dim, device)?)),
+            Activation::GELU => Ok(Self::GELU(GELUFFN::new_blank(
+                hidden_dim, ffn_dim, dtype, device,
+            )?)),
             Activation::GELUNew => Ok(Self::GELUNew(GELUNewFFN::new_blank(
-                hidden_dim, ffn_dim, device,
+                hidden_dim, ffn_dim, dtype, device,
             )?)),
         }
     }
@@ -189,7 +207,10 @@ impl FeedForward {
             Activation::SwiGLU => Ok(Self::SwiGLU(SwiGLU::new(hidden_dim, ffn_dim, device)?)),
             Activation::GELU => Ok(Self::GELU(GELUFFN::new(hidden_dim, ffn_dim, device)?)),
             Activation::GELUNew => Ok(Self::GELUNew(GELUNewFFN::new_blank(
-                hidden_dim, ffn_dim, device,
+                hidden_dim,
+                ffn_dim,
+                DType::F32,
+                device,
             )?)),
         }
     }

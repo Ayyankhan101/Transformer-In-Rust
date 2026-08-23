@@ -3,6 +3,8 @@ use candle_core::Result;
 use crate::generation::sampling::sample;
 use crate::glm::attention_mask::build_glm_mask;
 use crate::glm::model::GLMModel;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 pub struct GLMGenerator {
     model: GLMModel,
@@ -46,6 +48,7 @@ impl GLMGenerator {
     /// No blanks — generates new tokens after the prompt.
     pub fn generate(&self, prompt_token_ids: &[u32]) -> Result<Vec<u32>> {
         let device = self.model.embedding.weight.device();
+        let mut rng = StdRng::from_entropy();
         let mut generated = prompt_token_ids.to_vec();
 
         for _step in 0..self.max_new_tokens {
@@ -63,7 +66,7 @@ impl GLMGenerator {
                 self.top_p,
                 self.repetition_penalty,
                 &generated,
-                42,
+                &mut rng,
             )?;
 
             if Some(token_id) == self.eos_token_id {
@@ -86,6 +89,7 @@ impl GLMGenerator {
     /// - earlier positions within the same blank (causal within-span)
     pub fn fill_blanks(&self, context: &[u32], blank_lens: &[usize]) -> Result<Vec<u32>> {
         let device = self.model.embedding.weight.device();
+        let mut rng = StdRng::from_entropy();
         let total_blank_tokens: usize = blank_lens.iter().sum();
 
         let mut all_tokens = context.to_vec();
@@ -110,7 +114,7 @@ impl GLMGenerator {
                     self.top_p,
                     self.repetition_penalty,
                     &all_tokens,
-                    42,
+                    &mut rng,
                 )?;
 
                 all_tokens[position] = token_id;

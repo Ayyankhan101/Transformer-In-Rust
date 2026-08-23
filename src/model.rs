@@ -23,19 +23,24 @@ pub struct ModelContext {
 impl ModelContext {
     /// Load CodeGen-350M weights, tokenizer, and build generator.
     pub fn load(weights_dir: &Path, use_f16: bool, temperature: f64) -> Result<Self> {
-        let weights_path = weights_dir.join("pytorch_model.bin");
         let config_path = weights_dir.join("config.json");
         let tokenizer_path = weights_dir.join("tokenizer.json");
 
-        if !weights_path.exists() {
+        // safetensors loads faster and needs no pickle, so prefer it when present.
+        let safetensors_path = weights_dir.join("model.safetensors");
+        let pytorch_path = weights_dir.join("pytorch_model.bin");
+        let weights_path = if safetensors_path.exists() {
+            safetensors_path
+        } else if pytorch_path.exists() {
+            pytorch_path
+        } else {
             bail!(
-                "Weights not found at: {}\n\
+                "Weights not found in {dir}: expected model.safetensors or pytorch_model.bin\n\
                  Run `codegen download` or:\n  \
-                 huggingface-cli download Salesforce/codegen-350M-multi --local-dir {}",
-                weights_path.display(),
-                weights_dir.display()
+                 huggingface-cli download Salesforce/codegen-350M-multi --local-dir {dir}",
+                dir = weights_dir.display()
             );
-        }
+        };
 
         let mut config = if config_path.exists() {
             let config_str = std::fs::read_to_string(&config_path)?;
@@ -52,9 +57,12 @@ impl ModelContext {
         let device = Device::Cpu;
 
         let tokenizer = CodeGenTokenizer::from_file(tokenizer_path.to_str().unwrap())?;
-        let model = WeightLoader::load_from_pytorch(&weights_path, &config, &device)?;
+        let model = WeightLoader::load(&weights_path, &config, &device)?;
 
-        let generator = CodeGenGenerator::new(model, temperature, 40, 0.9, 1.2, 256);
+        // Without this the generator has no tokenizer, so the streaming callback
+        // receives an empty string for every token and `complete` prints nothing.
+        let generator = CodeGenGenerator::new(model, temperature, 40, 0.9, 1.2, 256)
+            .with_tokenizer(tokenizer.clone());
 
         Ok(Self {
             generator,

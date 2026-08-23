@@ -4,11 +4,12 @@
 //! - YAML-based configuration ([`config::TrainConfig`])
 //! - Data loading with train/eval split ([`data::DataLoader`])
 //! - Learning rate scheduling with warmup ([`lr_scheduler::LrScheduler`])
-//! - Gradient accumulation and clipping
+//! - Gradient accumulation and clipping ([`train::clip_grad_norm`])
 //! - Safetensors checkpoint save/load
 
 pub mod config;
 pub mod data;
+pub mod loss;
 pub mod lr_scheduler;
 pub mod train;
 

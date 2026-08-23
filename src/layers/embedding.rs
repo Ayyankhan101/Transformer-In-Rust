@@ -1,12 +1,17 @@
-use candle_core::{Device, Result, Tensor};
+use candle_core::{DType, Device, Result, Tensor};
 
 pub struct Embedding {
     pub weight: Tensor,
 }
 
 impl Embedding {
-    pub fn zeros(vocab_size: usize, hidden_dim: usize, device: &Device) -> Result<Self> {
-        let weight = Tensor::zeros((vocab_size, hidden_dim), candle_core::DType::F32, device)?;
+    pub fn zeros(
+        vocab_size: usize,
+        hidden_dim: usize,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
+        let weight = Tensor::zeros((vocab_size, hidden_dim), dtype, device)?;
         Ok(Self { weight })
     }
 
@@ -16,11 +21,8 @@ impl Embedding {
     }
 
     pub fn forward(&self, ids: &[u32]) -> Result<Tensor> {
-        let mut rows = Vec::new();
-        for &id in ids {
-            rows.push(self.weight.get(id as usize)?);
-        }
-        Tensor::stack(&rows, 0)?.unsqueeze(0)
+        let ids = Tensor::from_slice(ids, ids.len(), self.weight.device())?;
+        self.weight.index_select(&ids, 0)?.unsqueeze(0)
     }
 
     pub fn from_tensor(weight: Tensor) -> Self {

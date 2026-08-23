@@ -105,28 +105,7 @@ impl GLMModel {
         labels: &[i64],
     ) -> Result<Tensor> {
         let logits = self.forward(token_ids, context_len, blank_lens, mask)?;
-
-        // Compute cross-entropy on non -1 labels
-        let seq_len = token_ids.len();
-        let mut total_loss = 0.0f32;
-        let mut count = 0;
-
-        for (i, &label) in labels.iter().enumerate().take(seq_len) {
-            if label >= 0 {
-                let logits_i = logits.get(0)?.get(i)?;
-                let ce = candle_nn::ops::log_softmax(&logits_i, 0)?
-                    .get(label as usize)?
-                    .neg()?;
-                total_loss += ce.to_scalar::<f32>()?;
-                count += 1;
-            }
-        }
-
-        if count > 0 {
-            total_loss /= count as f32;
-        }
-
-        Tensor::new(total_loss, logits.device())
+        crate::training::loss::cross_entropy_loss(&logits, labels)
     }
 }
 

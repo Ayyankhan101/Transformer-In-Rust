@@ -2,8 +2,10 @@
 
 # Large model weights (download separately)
 codegen_weights/pytorch_model.bin
+codegen_weights/*.safetensors
 codegen_weights/.cache/
 glm_checkpoint.txt
+glm_checkpoint/
 
 # Editor/OS
 *.swp

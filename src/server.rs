@@ -9,6 +9,7 @@
 //! - `POST /generate` — Generate code from prompt
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 
 use axum::extract::State;
@@ -18,9 +19,8 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use crate::codegen::config::CodeGenConfig;
-use crate::codegen::weights::WeightLoader;
 use crate::generation::codegen_generate::CodeGenGenerator;
+use crate::model::ModelContext;
 use crate::tokenizer::CodeGenTokenizer;
 
 pub struct AppState {
@@ -67,28 +67,20 @@ pub struct HealthResponse {
     pub model: String,
 }
 
-pub async fn start_server(weights_path: &str, addr: SocketAddr) -> anyhow::Result<()> {
-    let device = candle_core::Device::Cpu;
-    let config = CodeGenConfig::default();
-
-    println!("Loading CodeGen model from {weights_path}...");
-    let model =
-        WeightLoader::load_from_pytorch(std::path::Path::new(weights_path), &config, &device)?;
-
-    let tokenizer = CodeGenTokenizer::from_file("codegen_weights/tokenizer.json")
-        .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {e}"))?;
-
-    let generator = CodeGenGenerator::new(
-        model, 0.8, // temperature
-        40,  // top_k
-        0.9, // top_p
-        1.1, // repetition_penalty
-        256, // max_new_tokens
-    );
+pub async fn start_server(
+    weights_dir: &Path,
+    use_f16: bool,
+    seed: Option<u64>,
+    addr: SocketAddr,
+) -> anyhow::Result<()> {
+    println!("Loading CodeGen model from {}...", weights_dir.display());
+    // Reuse the CLI loader so the server honours config.json and --f16 too.
+    let mut ctx = ModelContext::load(weights_dir, use_f16, 0.8)?;
+    ctx.generator.set_seed(seed);
 
     let state = Arc::new(AppState {
-        generator: Arc::new(Mutex::new(generator)),
-        tokenizer,
+        generator: Arc::new(Mutex::new(ctx.generator)),
+        tokenizer: ctx.tokenizer,
     });
 
     let app = Router::new()
@@ -132,17 +124,15 @@ async fn generate(
         )
     })?;
 
-    let generated = state
-        .tokenizer
-        .decode(&tokens[prompt_ids.len()..])
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Decode error: {e}"),
-            )
-        })?;
+    // `generate` returns the generated tokens only — the prompt is not included.
+    let generated = state.tokenizer.decode(&tokens).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Decode error: {e}"),
+        )
+    })?;
 
-    let token_count = tokens.len() - prompt_ids.len();
+    let token_count = tokens.len();
 
     Ok(Json(GenerateResponse {
         generated,

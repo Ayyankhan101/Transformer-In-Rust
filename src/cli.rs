@@ -10,6 +10,7 @@ use std::path::PathBuf;
 ///
 /// - `--f16` — Use FP16 precision (faster, less memory)
 /// - `--weights-dir` — Path to weights directory (default: `codegen_weights`)
+/// - `--seed` — Fixed sampling seed for reproducible output
 #[derive(Parser)]
 #[command(
     name = "codegen",
@@ -24,6 +25,10 @@ pub struct Cli {
     /// Path to weights directory
     #[arg(long, global = true, default_value = "codegen_weights")]
     pub weights_dir: PathBuf,
+
+    /// Fixed sampling seed for reproducible output (default: random each run)
+    #[arg(long, global = true)]
+    pub seed: Option<u64>,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -53,12 +58,14 @@ pub enum Commands {
         temperature: f64,
 
         /// Prompt template: completion, instruct, chat
-        #[arg(short, long, default_value = "completion")]
+        ///
+        /// No short flag: `-t` already belongs to `--temperature`.
+        #[arg(long, default_value = "completion")]
         template: String,
 
-        /// Stream tokens as they're generated
-        #[arg(long, default_value = "true")]
-        stream: bool,
+        /// Print the completion only when it is finished, instead of streaming it
+        #[arg(long)]
+        no_stream: bool,
     },
 
     /// Interactive REPL (single-turn)
@@ -86,5 +93,9 @@ pub enum Commands {
         /// Number of training steps
         #[arg(short, long, default_value = "1000")]
         steps: usize,
+
+        /// YAML training config (see configs/train.yaml). Defaults are used if omitted.
+        #[arg(short, long)]
+        config: Option<PathBuf>,
     },
 }

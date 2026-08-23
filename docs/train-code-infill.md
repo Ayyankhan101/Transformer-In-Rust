@@ -47,20 +47,27 @@ model:
   vocab_size: 16384
 
 training:
-  batch_size: 8
   learning_rate: 0.001
   max_steps: 5000
-  warmup_steps: 200
-  lr_schedule: cosine
-  eval_interval: 100
-  save_interval: 500
-  keep_last_n: 3
   max_seq_len: 128
-  gradient_accumulation_steps: 4
+  micro_batch_size: 1              # sequences per forward pass
+  gradient_accumulation_steps: 4   # forward passes per optimizer step
   max_grad_norm: 1.0
+  eval_every: 100
+  save_every: 500
+  log_every: 5
+  keep_last_n_checkpoints: 3
+  checkpoint_dir: glm_checkpoint
   data_dir: training_data
   download_if_empty: true
+  lr_schedule:
+    type: cosine
+    warmup_steps: 200
+    max_steps: 5000
+    min_lr_ratio: 0.1
 ```
+
+Every field is optional — anything you leave out falls back to its default.
 
 ### Key Parameters
 
@@ -69,7 +76,7 @@ training:
 | `hidden_dim` | 256 | Width of the transformer (small = fast) |
 | `num_layers` | 6 | Depth of the transformer |
 | `max_steps` | 5000 | Total training steps (~14M param model) |
-| `gradient_accumulation_steps` | 4 | Simulates larger batch size on limited memory |
+| `gradient_accumulation_steps` | 4 | Forward passes averaged into one optimizer step |
 | `warmup_steps` | 200 | Gradually increases LR to avoid instability |
 
 ---
@@ -79,7 +86,7 @@ training:
 ### Start training with YAML config:
 
 ```bash
-cargo run --release -- glm-train --data-path training_data --steps 5000
+cargo run --release -- glm-train --config configs/train.yaml --data-path training_data --steps 5000
 ```
 
 ### Or with defaults (auto-downloads training data):
@@ -91,23 +98,26 @@ cargo run --release -- glm-train
 ### What you'll see:
 
 ```
-Step    100 | loss=4.21 | lr=0.00050 | 0.12s/step
-Step    200 | loss=3.85 | lr=0.00100 | 0.11s/step
-Step    300 | loss=3.52 | lr=0.00087 | 0.11s/step
-...
-Step   1000 | loss=2.14 | lr=0.00012 | 0.11s/step
-Step   2000 | loss=1.43 | lr=0.00004 | 0.11s/step
-...
-Eval  | train_loss=1.02 | val_loss=1.31
+Step 5: loss = 10.8024 (avg = 10.8313), lr = 5.00e-4
+Step 10: loss = 10.2722 (avg = 10.7133), lr = 1.00e-3
+Step 20: loss = 9.2113 (avg = 10.2314), lr = 9.73e-4
+Step 40: loss = 5.5989 (avg = 8.6961), lr = 7.75e-4
+Step 60: loss = 4.3074 (avg = 7.5089), lr = 4.72e-4
+Step 80: loss = 4.9949 (avg = 6.8133), lr = 2.05e-4
+  Checkpoint saved to "glm_checkpoint/model_step_000080.safetensors" (step 80)
 ```
 
-Loss should drop steadily from ~4.5 to ~1.0 over 5000 steps.
+That is a real 80-step run on a 2-layer, `hidden_dim` 128 model over a single source
+file — small enough to overfit quickly, which is what you want when checking that the
+setup works at all. The per-step loss is noisy because each step sees a fresh random
+masking of one sequence; watch the running average instead. On a real corpus with the
+config above, expect a slower but steadier decline.
 
 ### Checkpoints
 
-Checkpoints are saved to `checkpoints/`:
+Checkpoints are saved to `checkpoint_dir` (default `glm_checkpoint/`):
 ```
-checkpoints/
+glm_checkpoint/
 ├── model_step_0000500.safetensors
 ├── optimizer_step_0000500.json
 ├── model_step_0001000.safetensors
@@ -170,6 +180,6 @@ This loads the latest checkpoint and generates code completions.
 |---------|-------|-----|
 | `No data files found` | Empty data directory | Use `--data-path` with a valid directory or populate `training_data/` |
 | Loss not decreasing | Learning rate too high/low | Adjust `learning_rate` (try 3e-4) |
-| Out of memory | Batch/sequence too large | Reduce `batch_size` or `max_seq_len` |
-| NaN loss | Gradient explosion | Reduce `learning_rate` or increase `warmup_steps` |
+| Out of memory | Batch/sequence too large | Reduce `micro_batch_size` or `max_seq_len` |
+| NaN loss | Gradient explosion | Reduce `learning_rate`, lower `max_grad_norm`, or increase `warmup_steps` |
 | Slow training | Debug build | Always use `--release` for training |
