@@ -9,6 +9,7 @@ use crate::model::ModelContext;
 
 pub fn run(cli: &Cli, system: Option<String>) -> Result<()> {
     let mut ctx = ModelContext::load_default(&cli.weights_dir, cli.f16)?;
+    ctx.generator.set_seed(cli.seed);
 
     let mut session = ChatSession::new(1024);
     if let Some(sys) = system {

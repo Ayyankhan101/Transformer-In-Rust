@@ -1,0 +1,39 @@
+{
+  "_name_or_path": "",
+  "activation_function": "gelu_new",
+  "architectures": null,
+  "attn_pdrop": 0.0,
+  "bos_token_id": 50256,
+  "chunk_size_feed_forward": 0,
+  "dtype": null,
+  "embd_pdrop": 0.0,
+  "eos_token_id": 50256,
+  "id2label": {
+    "0": "LABEL_0",
+    "1": "LABEL_1"
+  },
+  "initializer_range": 0.02,
+  "is_encoder_decoder": false,
+  "label2id": {
+    "LABEL_0": 0,
+    "LABEL_1": 1
+  },
+  "layer_norm_epsilon": 1e-05,
+  "model_type": "codegen",
+  "n_ctx": 64,
+  "n_embd": 128,
+  "n_head": 4,
+  "n_inner": null,
+  "n_layer": 2,
+  "n_positions": 64,
+  "output_attentions": false,
+  "output_hidden_states": false,
+  "problem_type": null,
+  "resid_pdrop": 0.0,
+  "return_dict": true,
+  "rotary_dim": 16,
+  "tie_word_embeddings": false,
+  "transformers_version": "5.12.1",
+  "use_cache": true,
+  "vocab_size": 256
+}

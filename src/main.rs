@@ -1,19 +1,10 @@
-mod cli;
-mod commands;
-mod model;
-
-mod codegen;
-mod generation;
-mod glm;
-mod layers;
-#[cfg(feature = "server")]
-mod server;
-mod tokenizer;
-mod training;
+//! CLI entry point. Everything it drives lives in the library crate, so the
+//! binary does not compile a second copy of the module tree.
 
 use clap::Parser;
 
-use cli::{Cli, Commands};
+use rust_transformer::cli::{Cli, Commands};
+use rust_transformer::commands;
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();

@@ -7,7 +7,8 @@ use crate::generation::codegen_generate::CollectStream;
 use crate::model::ModelContext;
 
 pub fn run(cli: &Cli) -> Result<()> {
-    let ctx = ModelContext::load_default(&cli.weights_dir, cli.f16)?;
+    let mut ctx = ModelContext::load_default(&cli.weights_dir, cli.f16)?;
+    ctx.generator.set_seed(cli.seed);
 
     println!("CodeGen-350M REPL — type a prompt and get generated code.");
     println!("Type 'exit' or 'quit' to stop.\n");
@@ -35,7 +36,7 @@ pub fn run(cli: &Cli) -> Result<()> {
         ctx.generator.generate_stream(&token_ids, &mut collector)?;
         let elapsed = start.elapsed();
 
-        let generated_ids = &collector.tokens[token_ids.len()..];
+        let generated_ids = &collector.tokens[..];
         let output = ctx.tokenizer.decode(generated_ids)?;
         println!("\n{output}");
         println!(

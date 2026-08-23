@@ -10,6 +10,7 @@ use std::path::PathBuf;
 ///
 /// - `--f16` — Use FP16 precision (faster, less memory)
 /// - `--weights-dir` — Path to weights directory (default: `codegen_weights`)
+/// - `--seed` — Fixed sampling seed for reproducible output
 #[derive(Parser)]
 #[command(
     name = "codegen",
@@ -24,6 +25,10 @@ pub struct Cli {
     /// Path to weights directory
     #[arg(long, global = true, default_value = "codegen_weights")]
     pub weights_dir: PathBuf,
+
+    /// Fixed sampling seed for reproducible output (default: random each run)
+    #[arg(long, global = true)]
+    pub seed: Option<u64>,
 
     #[command(subcommand)]
     pub command: Commands,

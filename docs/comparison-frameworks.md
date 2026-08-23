@@ -15,7 +15,7 @@ Comparing this project against other Rust ML frameworks for transformer inferenc
 | **Build Time** | ~2 min | ~3 min | ~5 min | ~10 min |
 | **Model Support** | GLM + CodeGen | Llama, GPT2, etc. | Custom | Any PyTorch model |
 | **Training** | ✅ GLM only | ❌ No | ✅ Yes | ✅ Yes |
-| **Quantization** | ✅ INT8 (manual) | ✅ GGML/GGUF | ✅ INT8/FP4 | ❌ No |
+| **Quantization** | ❌ FP16 only | ✅ GGML/GGUF | ✅ INT8/FP4 | ❌ No |
 
 ---
 
@@ -35,7 +35,7 @@ Comparing this project against other Rust ML frameworks for transformer inferenc
 **Weaknesses**:
 - CPU-only (no CUDA/Metal backend)
 - Limited model zoo (GLM + CodeGen only)
-- No quantization via GGML (manual INT8 only)
+- No quantization (FP32 and FP16 only)
 - No distributed training
 
 **Best for**: Learning, CPU-only deployment, edge devices, custom architectures

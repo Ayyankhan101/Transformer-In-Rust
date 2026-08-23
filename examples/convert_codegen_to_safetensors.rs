@@ -9,8 +9,10 @@
 //!       /path/to/codegen_weights/pytorch_model.bin \
 //!       /path/to/codegen_weights/model.safetensors
 //!
-//! Then load in inference:
-//!   cargo run --release -- --codegen --weights /path/to/codegen_weights/model.safetensors
+//! The result is picked up automatically: `ModelContext` prefers
+//! `model.safetensors` over `pytorch_model.bin` in the weights directory.
+//!
+//!   cargo run --release -- --weights-dir /path/to/codegen_weights complete "def f():"
 
 use std::fs;
 use std::path::PathBuf;

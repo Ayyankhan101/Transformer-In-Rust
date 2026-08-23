@@ -17,7 +17,12 @@ fn codegen_forward_pass_with_real_weights() {
     }
 
     let device = candle_core::Device::Cpu;
-    let config = rust_transformer::codegen::config::CodeGenConfig::default();
+    // The checkpoint's own config.json — the defaults differ from it
+    // (rotary_dim 64 vs 32, vocab_size 50400 vs 51200).
+    let config_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string("codegen_weights/config.json").unwrap())
+            .expect("config.json is not valid JSON");
+    let config = rust_transformer::codegen::config::CodeGenConfig::from_hf_config(&config_json);
     let model = rust_transformer::codegen::weights::WeightLoader::load_from_pytorch(
         Path::new("codegen_weights/pytorch_model.bin"),
         &config,
@@ -36,15 +41,13 @@ fn codegen_forward_pass_with_real_weights() {
         model, 0.0, 1, 1.0, 1.0, 64,
     );
 
+    // `generate` returns the generated tokens only, not prompt + generated.
     let generated = gen.generate(&token_ids).expect("Generation failed");
     let output = tokenizer.decode(&generated).expect("Decode failed");
 
     println!("Prompt: {prompt}");
     println!("Generated: {output}");
-    assert!(
-        generated.len() > token_ids.len(),
-        "Should generate at least one token"
-    );
+    assert!(!generated.is_empty(), "Should generate at least one token");
 }
 
 #[test]

@@ -170,4 +170,4 @@ sudo systemctl start codegen
 - Generation speed is ~0.3-0.8 tokens/second (usable for short completions)
 - Not suitable for real-time interactive use
 - Large context windows (>512 tokens) may cause OOM
-- INT8 quantization can reduce memory by ~4x with minimal quality loss
+- `--f16` halves weight memory and is wired through every layer

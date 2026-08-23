@@ -1,5 +1,10 @@
 use candle_core::{DType, Result, Tensor};
+use rand::Rng;
 
+/// Sample one token from `logits`.
+///
+/// `rng` is supplied by the caller so a whole generation can share one stream —
+/// re-seeding per token would draw the same value every step.
 pub fn sample(
     logits: &Tensor,
     temperature: f64,
@@ -7,7 +12,7 @@ pub fn sample(
     top_p: f64,
     repetition_penalty: f64,
     seen_tokens: &[u32],
-    seed: u64,
+    rng: &mut impl Rng,
 ) -> Result<u32> {
     let logits = if logits.dtype() != DType::F32 {
         logits.to_dtype(DType::F32)?
@@ -89,11 +94,7 @@ pub fn sample(
         *p /= sum;
     }
 
-    let mut state = seed;
-    let r = {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (state as f32) / (u32::MAX as f32)
-    };
+    let r: f32 = rng.gen();
 
     cumulative = 0.0;
     for &(idx, p) in &indexed {
@@ -110,6 +111,8 @@ pub fn sample(
 mod tests {
     use super::*;
     use candle_core::Device;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_argmax_sampling() -> Result<()> {
@@ -117,7 +120,8 @@ mod tests {
         let mut data = vec![0.0f32; 100];
         data[42] = 10.0;
         let logits = Tensor::from_vec(data, 100, &device)?;
-        let token = sample(&logits, 0.0, 1, 1.0, 1.0, &[], 0)?;
+        let mut rng = StdRng::seed_from_u64(7);
+        let token = sample(&logits, 0.0, 1, 1.0, 1.0, &[], &mut rng)?;
         assert_eq!(token, 42);
         Ok(())
     }
@@ -129,7 +133,8 @@ mod tests {
         data[99] = 5.0;
         data[50] = 3.0;
         let logits = Tensor::from_vec(data, 100, &device)?;
-        let token = sample(&logits, 0.0, 50, 1.0, 1.0, &[], 0)?;
+        let mut rng = StdRng::seed_from_u64(7);
+        let token = sample(&logits, 0.0, 50, 1.0, 1.0, &[], &mut rng)?;
         assert_eq!(token, 99);
         Ok(())
     }
@@ -139,7 +144,8 @@ mod tests {
         let device = Device::Cpu;
         let data = vec![1.0f32; 10];
         let logits = Tensor::from_vec(data, 10, &device)?;
-        let token = sample(&logits, 0.0, 10, 1.0, 2.0, &[5], 0)?;
+        let mut rng = StdRng::seed_from_u64(7);
+        let token = sample(&logits, 0.0, 10, 1.0, 2.0, &[5], &mut rng)?;
         assert_ne!(token, 5);
         Ok(())
     }
@@ -152,7 +158,8 @@ mod tests {
         data[1] = 9.0;
         data[2] = 8.0;
         let logits = Tensor::from_vec(data, 100, &device)?;
-        let token = sample(&logits, 0.0, 3, 1.0, 1.0, &[], 0)?;
+        let mut rng = StdRng::seed_from_u64(7);
+        let token = sample(&logits, 0.0, 3, 1.0, 1.0, &[], &mut rng)?;
         assert!(token <= 2);
         Ok(())
     }
@@ -164,7 +171,8 @@ mod tests {
         data[0] = 10.0;
         data[1] = 9.0;
         let logits = Tensor::from_vec(data, 100, &device)?;
-        let token = sample(&logits, 1.0, 100, 0.5, 1.0, &[], 42)?;
+        let mut rng = StdRng::seed_from_u64(7);
+        let token = sample(&logits, 1.0, 100, 0.5, 1.0, &[], &mut rng)?;
         assert!(token <= 1);
         Ok(())
     }
@@ -174,7 +182,8 @@ mod tests {
         let device = Device::Cpu;
         let data = vec![1.0f32; 10];
         let logits = Tensor::from_vec(data, 10, &device)?;
-        let token = sample(&logits, 1.0, 10, 1.0, 1.0, &[], 0)?;
+        let mut rng = StdRng::seed_from_u64(7);
+        let token = sample(&logits, 1.0, 10, 1.0, 1.0, &[], &mut rng)?;
         assert!(token < 10);
         Ok(())
     }
@@ -184,7 +193,8 @@ mod tests {
         let device = Device::Cpu;
         let data = vec![5.0f32];
         let logits = Tensor::from_vec(data, 1, &device)?;
-        let token = sample(&logits, 1.0, 1, 1.0, 1.0, &[], 0)?;
+        let mut rng = StdRng::seed_from_u64(7);
+        let token = sample(&logits, 1.0, 1, 1.0, 1.0, &[], &mut rng)?;
         assert_eq!(token, 0);
         Ok(())
     }
@@ -195,8 +205,46 @@ mod tests {
         let mut data = vec![-10.0f32; 50];
         data[25] = -1.0;
         let logits = Tensor::from_vec(data, 50, &device)?;
-        let token = sample(&logits, 0.0, 50, 1.0, 1.0, &[], 0)?;
+        let mut rng = StdRng::seed_from_u64(7);
+        let token = sample(&logits, 0.0, 50, 1.0, 1.0, &[], &mut rng)?;
         assert_eq!(token, 25);
+        Ok(())
+    }
+
+    /// Regression: sampling used to fall through to argmax for every token
+    /// because the RNG produced values far outside [0, 1).
+    #[test]
+    fn test_sampling_is_not_always_argmax() -> Result<()> {
+        let device = Device::Cpu;
+        let logits = Tensor::from_vec(vec![0.0f32; 32], 32, &device)?;
+        let mut rng = StdRng::seed_from_u64(7);
+
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..50 {
+            seen.insert(sample(&logits, 1.0, 32, 1.0, 1.0, &[], &mut rng)?);
+        }
+        assert!(
+            seen.len() > 1,
+            "uniform logits should not always yield the same token, got {seen:?}"
+        );
+        Ok(())
+    }
+
+    /// Same seed, same sequence — reproducibility for `--seed`.
+    #[test]
+    fn test_sampling_is_reproducible_for_a_given_seed() -> Result<()> {
+        let device = Device::Cpu;
+        let logits = Tensor::from_vec(vec![0.0f32; 32], 32, &device)?;
+
+        let draw = |seed: u64| -> Result<Vec<u32>> {
+            let mut rng = StdRng::seed_from_u64(seed);
+            (0..10)
+                .map(|_| sample(&logits, 1.0, 32, 1.0, 1.0, &[], &mut rng))
+                .collect()
+        };
+
+        assert_eq!(draw(11)?, draw(11)?);
+        assert_ne!(draw(11)?, draw(12)?);
         Ok(())
     }
 }

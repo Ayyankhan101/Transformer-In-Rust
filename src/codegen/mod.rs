@@ -9,11 +9,10 @@
 //! - Rotary Position Embedding (RoPE)
 //! - KV cache for efficient autoregressive generation
 //! - Parallel attention + FFN (GPT-J style)
-//! - INT8 quantization support
+//! - FP16 inference
 
 pub mod config;
 pub mod kv_cache;
 pub mod model;
-pub mod quantized;
 pub mod rotary;
 pub mod weights;

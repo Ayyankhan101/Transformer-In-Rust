@@ -9,15 +9,16 @@ pub struct MultiHeadAttention {
 }
 
 impl MultiHeadAttention {
-    pub fn new_blank(hidden_dim: usize, num_heads: usize, device: &Device) -> Result<Self> {
+    pub fn new_blank(
+        hidden_dim: usize,
+        num_heads: usize,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
         assert_eq!(hidden_dim % num_heads, 0);
         let head_dim = hidden_dim / num_heads;
-        let qkv_weight = Tensor::zeros(
-            (hidden_dim, hidden_dim * 3),
-            candle_core::DType::F32,
-            device,
-        )?;
-        let out_weight = Tensor::zeros((hidden_dim, hidden_dim), candle_core::DType::F32, device)?;
+        let qkv_weight = Tensor::zeros((hidden_dim, hidden_dim * 3), dtype, device)?;
+        let out_weight = Tensor::zeros((hidden_dim, hidden_dim), dtype, device)?;
         let scale = 1.0 / (head_dim as f64).sqrt();
         Ok(Self {
             qkv_weight,

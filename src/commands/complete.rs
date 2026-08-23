@@ -16,6 +16,7 @@ pub fn run(
 ) -> Result<()> {
     let mut ctx = ModelContext::load(&cli.weights_dir, cli.f16, temperature)?;
     ctx.generator.set_max_new_tokens(max_tokens);
+    ctx.generator.set_seed(cli.seed);
 
     // Apply prompt template
     let formatted = match template {
@@ -49,7 +50,7 @@ pub fn run(
         ctx.generator.generate_stream(&token_ids, &mut collector)?;
         let elapsed = start.elapsed();
 
-        let generated_ids = &collector.tokens[token_ids.len()..];
+        let generated_ids = &collector.tokens[..];
         let output = ctx.tokenizer.decode(generated_ids)?;
         println!("{output}");
         println!(

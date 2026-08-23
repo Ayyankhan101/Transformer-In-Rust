@@ -10,7 +10,9 @@ pub fn run(cli: &Cli, port: u16) -> Result<()> {
         let addr: SocketAddr = ([0, 0, 0, 0], port).into();
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(server::start_server(
-            cli.weights_dir.join("pytorch_model.bin").to_str().unwrap(),
+            &cli.weights_dir,
+            cli.f16,
+            cli.seed,
             addr,
         ))
     }
