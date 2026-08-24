@@ -29,7 +29,7 @@ gemm = { version = "0.17", features = ["f16"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 rand = "0.9"
-rand_distr = "0.5"
+rand_distr = "0.6"
 bytemuck = "1.25.2"
 half = "2.7"
 clap = { version = "4.6.4", features = ["derive"] }
