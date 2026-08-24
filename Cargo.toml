@@ -28,7 +28,7 @@ ureq = { version = "3", features = ["json"] }
 gemm = { version = "0.17", features = ["f16"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
-rand = "0.9"
+rand = "0.10"
 rand_distr = "0.5"
 bytemuck = "1.25.2"
 half = "2.7"
