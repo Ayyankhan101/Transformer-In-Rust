@@ -169,7 +169,13 @@ impl GLMTrainer {
         Ok(loss_scalar)
     }
 
-    pub fn train(&mut self, data_dir: &Path, device: &Device) -> Result<()> {
+    /// Run the training loop.
+    ///
+    /// With `resume`, weights and the step counter are restored from the newest
+    /// checkpoint in `checkpoint_dir`. Without it, any existing checkpoints are left
+    /// alone and training starts from step 0 — resuming used to happen implicitly,
+    /// which meant a stale directory could silently turn a run into a no-op.
+    pub fn train(&mut self, data_dir: &Path, device: &Device, resume: bool) -> Result<()> {
         // Load data
         let mut examples = load_data(data_dir, &self.tokenizer)?;
 
@@ -207,8 +213,30 @@ impl GLMTrainer {
             self.config.seed + 1,
         )?;
 
-        // Try to load checkpoint
-        self.load_checkpoint()?;
+        if resume {
+            if !self.load_checkpoint()? {
+                println!(
+                    "--resume: no checkpoint in {:?}, starting from step 0",
+                    self.config.checkpoint_dir
+                );
+            }
+        } else if self.latest_checkpoint().is_some() {
+            println!(
+                "\x1b[33mNote: checkpoints exist in {:?} but --resume was not passed; \
+                 starting from step 0 and overwriting.\x1b[0m",
+                self.config.checkpoint_dir
+            );
+        }
+
+        // A resumed run that is already at the limit would otherwise fall straight
+        // through the loop and report success without training anything.
+        if self.step >= self.config.max_steps {
+            return Err(candle_core::Error::Msg(format!(
+                "nothing to do: resumed at step {} but max_steps is {}. \
+                 Pass a larger --steps to continue training.",
+                self.step, self.config.max_steps
+            )));
+        }
 
         println!("Starting training from step {}", self.step);
         println!("  Max steps: {}", self.config.max_steps);
@@ -293,33 +321,28 @@ impl GLMTrainer {
 
         let params = self.model.param_vars();
         let names = param_names(self.glm_config.num_layers);
-
-        // Save as safetensors
-        let mut tensor_data = Vec::new();
-        for (i, var) in params.iter().enumerate() {
-            let name = names.get(i).map(|s| s.as_str()).unwrap_or("unknown");
-            let tensor = var.as_tensor();
-            tensor_data.push((name.to_string(), tensor));
+        // Saving and loading pair these two positionally. A mismatch used to fall back
+        // to the literal name "unknown", which collides in the safetensors map and
+        // silently drops every parameter after the first.
+        if params.len() != names.len() {
+            return Err(candle_core::Error::Msg(format!(
+                "checkpoint layout mismatch: {} parameters but {} names",
+                params.len(),
+                names.len()
+            )));
         }
+
+        let tensors: Vec<(String, &Tensor)> = names
+            .iter()
+            .cloned()
+            .zip(params.iter().map(|var| var.as_tensor()))
+            .collect();
 
         let path = dir.join(format!("model_step_{:06}.safetensors", self.step));
-        save_safetensors(&path, &tensor_data)?;
+        save_safetensors(&path, &tensors)?;
 
-        // Save optimizer state (simplified - just step count)
-        if self.config.save_optimizer_state {
-            let opt_path = dir.join(format!("optimizer_step_{:06}.json", self.step));
-            let state = serde_json::json!({
-                "step": self.step,
-            });
-            let opt_json = serde_json::to_string_pretty(&state).map_err(|e| {
-                candle_core::Error::Msg(format!("Failed to serialize optimizer state: {e}"))
-            })?;
-            std::fs::write(&opt_path, opt_json).map_err(|e| {
-                candle_core::Error::Msg(format!("Failed to write optimizer state: {e}"))
-            })?;
-        }
-
-        // Save training state
+        // Only the step and learning rate are restorable: candle's AdamW keeps its
+        // moments in a private struct with no accessor, so they cannot be saved.
         let state_path = dir.join("training_state.json");
         let state = serde_json::json!({
             "step": self.step,
@@ -334,14 +357,11 @@ impl GLMTrainer {
         Ok(())
     }
 
-    pub fn load_checkpoint(&mut self) -> Result<()> {
+    /// Path of the highest-numbered `model_step_*.safetensors` in the checkpoint dir.
+    fn latest_checkpoint(&self) -> Option<PathBuf> {
         let dir = Path::new(&self.config.checkpoint_dir);
-        if !dir.exists() {
-            return Ok(());
-        }
-
-        // Find latest checkpoint
-        let mut checkpoints: Vec<PathBuf> = std::fs::read_dir(dir)?
+        let mut checkpoints: Vec<PathBuf> = std::fs::read_dir(dir)
+            .ok()?
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("safetensors"))
@@ -352,47 +372,38 @@ impl GLMTrainer {
                     .starts_with("model_step_")
             })
             .collect();
-
         checkpoints.sort();
+        checkpoints.pop()
+    }
 
-        if let Some(latest) = checkpoints.last() {
-            println!("Loading checkpoint from {:?}", latest);
-            load_safetensors(latest, &mut self.model)?;
+    /// Restore weights, step counter and learning-rate schedule position from the
+    /// newest checkpoint. Returns `false` if there was nothing to restore.
+    ///
+    /// AdamW's moments are **not** restored — candle keeps them private — so the first
+    /// steps after a resume run with a cold optimizer and the loss briefly rises.
+    pub fn load_checkpoint(&mut self) -> Result<bool> {
+        let Some(latest) = self.latest_checkpoint() else {
+            return Ok(false);
+        };
 
-            // Load optimizer state
-            let opt_path = dir.join(
-                latest
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .replace("model_", "optimizer_")
-                    .replace(".safetensors", ".json"),
-            );
-            if opt_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&opt_path) {
-                    if let Ok(state) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if let Some(_step) = state.get("step").and_then(|v| v.as_u64()) {
-                            // Note: AdamW doesn't expose step_count setter, but we track our own step
-                        }
-                    }
-                }
-            }
+        println!("Loading checkpoint from {:?}", latest);
+        load_safetensors(&latest, &mut self.model)?;
 
-            // Load training state
-            let state_path = dir.join("training_state.json");
-            if state_path.exists() {
-                let content = std::fs::read_to_string(&state_path)
-                    .map_err(|e| candle_core::Error::Msg(format!("Failed to read state: {e}")))?;
-                let state: serde_json::Value = serde_json::from_str(&content)
-                    .map_err(|e| candle_core::Error::Msg(format!("Failed to parse state: {e}")))?;
-                self.step = state.get("step").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                self.lr_scheduler.set_step(self.step);
-            }
-
-            println!("Resumed from step {}", self.step);
+        let state_path = Path::new(&self.config.checkpoint_dir).join("training_state.json");
+        if state_path.exists() {
+            let content = std::fs::read_to_string(&state_path)
+                .map_err(|e| candle_core::Error::Msg(format!("Failed to read state: {e}")))?;
+            let state: serde_json::Value = serde_json::from_str(&content)
+                .map_err(|e| candle_core::Error::Msg(format!("Failed to parse state: {e}")))?;
+            self.step = state.get("step").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            self.lr_scheduler.set_step(self.step);
         }
 
-        Ok(())
+        println!(
+            "Resumed from step {} (optimizer moments restart cold)",
+            self.step
+        );
+        Ok(true)
     }
 
     fn cleanup_old_checkpoints(&self) -> Result<()> {
@@ -413,15 +424,6 @@ impl GLMTrainer {
         while model_checkpoints.len() > self.config.keep_last_n_checkpoints {
             let oldest = model_checkpoints.remove(0);
             let _ = std::fs::remove_file(&oldest);
-            let opt_file = dir.join(
-                oldest
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .replace("model_", "optimizer_")
-                    .replace(".safetensors", ".json"),
-            );
-            let _ = std::fs::remove_file(&opt_file);
         }
 
         Ok(())
@@ -680,6 +682,84 @@ mod tests {
         let after = grad_global_norm(&grads, &params)?;
 
         assert!((after - before).abs() < 1e-6, "{before} changed to {after}");
+        Ok(())
+    }
+
+    fn tiny_model_config() -> GLMConfig {
+        GLMConfig {
+            vocab_size: 64,
+            hidden_dim: 32,
+            num_layers: 2,
+            num_heads: 4,
+            ffn_dim: 64,
+            max_seq_len: 16,
+            ..Default::default()
+        }
+    }
+
+    /// Saving and loading pair `param_vars()` with `param_names()` positionally, so
+    /// the two must agree in length and the names must be unique. If they ever drift,
+    /// every parameter after the first mismatch loads into the wrong slot.
+    #[test]
+    fn parameter_names_match_parameter_vars() -> Result<()> {
+        let device = Device::Cpu;
+        let config = tiny_model_config();
+        let model = TrainableGLMModel::new(config.clone(), &device)?;
+
+        let names = param_names(config.num_layers);
+        assert_eq!(
+            names.len(),
+            model.param_vars().len(),
+            "name list and parameter list have drifted apart"
+        );
+
+        let unique: std::collections::HashSet<&String> = names.iter().collect();
+        assert_eq!(
+            unique.len(),
+            names.len(),
+            "duplicate parameter names: {names:?}"
+        );
+        Ok(())
+    }
+
+    /// A restored model must equal the saved one, parameter for parameter.
+    #[test]
+    fn checkpoint_round_trip_restores_every_parameter() -> Result<()> {
+        let device = Device::Cpu;
+        let config = tiny_model_config();
+        let saved = TrainableGLMModel::new(config.clone(), &device)?;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model_step_000001.safetensors");
+        let names = param_names(config.num_layers);
+        let vars = saved.param_vars();
+        let tensors: Vec<(String, &Tensor)> = names
+            .iter()
+            .cloned()
+            .zip(vars.iter().map(|v| v.as_tensor()))
+            .collect();
+        save_safetensors(&path, &tensors)?;
+
+        // A second model starts from different random weights.
+        let mut restored = TrainableGLMModel::new(config.clone(), &device)?;
+        let before = (restored.param_vars()[0].as_tensor() - vars[0].as_tensor())?
+            .abs()?
+            .max_all()?
+            .to_scalar::<f32>()?;
+        assert!(before > 0.0, "the two models started out identical");
+
+        load_safetensors(&path, &mut restored)?;
+
+        for (name, (expected, actual)) in names
+            .iter()
+            .zip(vars.iter().zip(restored.param_vars().iter()))
+        {
+            let diff = (actual.as_tensor() - expected.as_tensor())?
+                .abs()?
+                .max_all()?
+                .to_scalar::<f32>()?;
+            assert!(diff < 1e-6, "{name} differs by {diff} after a round trip");
+        }
         Ok(())
     }
 }

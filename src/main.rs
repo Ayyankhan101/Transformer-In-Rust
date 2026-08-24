@@ -33,6 +33,7 @@ fn main() -> anyhow::Result<()> {
             data_path,
             steps,
             config,
-        } => commands::glm_train::run(&cli, data_path, *steps, config.as_deref()),
+            resume,
+        } => commands::glm_train::run(&cli, data_path, *steps, config.as_deref(), *resume),
     }
 }

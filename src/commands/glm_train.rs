@@ -6,7 +6,13 @@ use candle_core::Device;
 use crate::cli::Cli;
 use crate::training::{GLMTrainer, TrainConfig};
 
-pub fn run(cli: &Cli, data_path: &str, steps: usize, config_path: Option<&Path>) -> Result<()> {
+pub fn run(
+    cli: &Cli,
+    data_path: &str,
+    steps: usize,
+    config_path: Option<&Path>,
+    resume: bool,
+) -> Result<()> {
     let device = Device::Cpu;
     let dtype_str = if cli.f16 { "FP16" } else { "FP32" };
 
@@ -52,7 +58,7 @@ pub fn run(cli: &Cli, data_path: &str, steps: usize, config_path: Option<&Path>)
     let mut trainer = GLMTrainer::from_config(&config, &device)?;
 
     println!("Starting training for {steps} steps...\n");
-    trainer.train(data_dir, &device)?;
+    trainer.train(data_dir, &device, resume)?;
 
     println!("\nTraining complete!");
     Ok(())

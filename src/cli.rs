@@ -97,5 +97,12 @@ pub enum Commands {
         /// YAML training config (see configs/train.yaml). Defaults are used if omitted.
         #[arg(short, long)]
         config: Option<PathBuf>,
+
+        /// Continue from the newest checkpoint instead of starting from step 0
+        ///
+        /// Restores weights, the step counter and the learning-rate schedule.
+        /// AdamW's moments are not restored, so the loss briefly rises after a resume.
+        #[arg(long)]
+        resume: bool,
     },
 }
