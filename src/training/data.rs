@@ -2,7 +2,7 @@ use crate::tokenizer::CodeGenTokenizer;
 use candle_core::Result;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 use std::io::Read;
 use std::path::Path;

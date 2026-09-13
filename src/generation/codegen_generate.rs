@@ -184,7 +184,7 @@ impl CodeGenGenerator {
         // same value at every step.
         let mut rng = match self.seed {
             Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::from_os_rng(),
+            None => rand::make_rng::<StdRng>(),
         };
 
         let mut cache: Option<Vec<KVCache>> = None;

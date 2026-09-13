@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — dependencies
+- Bumped `rand` 0.9 → 0.10.2 and `rand_distr` 0.5 → 0.6.0. `candle-core` still
+  pulls `rand` 0.9 / `rand_distr` 0.5 for itself; the crate now depends on both
+  major lines.
+- Migrated call sites for rand 0.10: `Rng` → `RngExt`, `StdRng::from_os_rng()` →
+  `rand::make_rng::<StdRng>()` (typed), and `&mut impl Rng` bounds on sampling /
+  training helpers to `RngExt`.
+
 ### Fixed — checkpointing
 - **Resume was implicit and could silently do nothing.** `train()` loaded any checkpoint it
   found with no flag and no way to opt out, restoring the step counter with it — so

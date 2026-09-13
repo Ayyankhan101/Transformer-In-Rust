@@ -1,5 +1,5 @@
 use candle_core::{DType, Result, Tensor};
-use rand::Rng;
+use rand::RngExt;
 
 /// Sample one token from `logits`.
 ///
@@ -12,7 +12,7 @@ pub fn sample(
     top_p: f64,
     repetition_penalty: f64,
     seen_tokens: &[u32],
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
 ) -> Result<u32> {
     let logits = if logits.dtype() != DType::F32 {
         logits.to_dtype(DType::F32)?

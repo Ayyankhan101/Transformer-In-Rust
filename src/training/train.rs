@@ -7,7 +7,7 @@ use candle_core::{DType, Device, Result, Tensor, Var};
 use candle_nn::{AdamW, Optimizer, ParamsAdamW};
 use half;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use safetensors::tensor::TensorView;
 use safetensors::SafeTensors;
 
@@ -40,7 +40,7 @@ pub struct GLMTrainer {
 /// Corrupt a sequence for masked denoising: some positions are replaced by the
 /// mask token or a random token, and their originals become the labels.
 /// Positions left alone get `-1`, which [`cross_entropy_loss`] ignores.
-fn corrupt(config: &GLMConfig, tokens: &[u32], rng: &mut impl Rng) -> (Vec<u32>, Vec<i64>) {
+fn corrupt(config: &GLMConfig, tokens: &[u32], rng: &mut impl RngExt) -> (Vec<u32>, Vec<i64>) {
     let mask_token_id = config.vocab_size as u32 - 1;
     let mut inputs = tokens.to_vec();
     let mut labels = vec![-1i64; tokens.len()];
