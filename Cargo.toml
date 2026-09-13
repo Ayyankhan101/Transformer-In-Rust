@@ -25,7 +25,7 @@ anyhow = "1.0"
 safetensors = "0.8.0"
 serde_json = "1.0"
 ureq = { version = "3", features = ["json"] }
-gemm = { version = "0.17", features = ["f16"] }
+gemm = { version = "0.19", features = ["f16"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 rand = "0.9"
